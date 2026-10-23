@@ -1,5 +1,5 @@
 {
-  "schema": "human_scene_v1",
+  "schema": "human_scene_v2",
   "scene_id": "city_example",
   "environment": "city",
   "seed": 20261023,
@@ -8,7 +8,10 @@
   "people": [
     {
       "person_id": 1,
-      "asset": "city_motion_1",
+      "body": "M01",
+      "motion": "APD6526",
+      "clothing": "M01_simple",
+      "hair": "M01_groom",
       "motion_start": 0,
       "route_xy_m": [[0, 77.96], [0, 92]],
       "speed_m_s": 1.2,

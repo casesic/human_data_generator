@@ -7,10 +7,12 @@ from pathlib import Path
 import numpy as np
 
 from human_data_generator.config import resources
+from human_data_generator.components import select
+from human_data_generator.composition import build
 from human_data_generator.data.dynamic_scene import geometry_paths, checked_matrices
 
-SCHEMA = 'human_scene_v1'
-PERSON_KEYS = {'person_id','asset','motion_start','route_xy_m','speed_m_s','start_progress_m'}
+SCHEMA = 'human_scene_v2'
+PERSON_KEYS = {'person_id','body','motion','clothing','hair','motion_start','route_xy_m','speed_m_s','start_progress_m'}
 RIG_KEYS = {'rig_id','origin_m','yaw_deg'}
 SCENE_KEYS = {'schema','scene_id','environment','seed','fps','frame_count','people','rigs'}
 
@@ -49,8 +51,8 @@ def _curve(points, distance):
     return xy,tangent
 
 
-def _asset_timeline(asset, start, count, fps):
-    rows=json.loads(Path(asset['timeline_ref']).read_text())
+def _asset_timeline(motion, start, count, fps):
+    rows=json.loads(Path(motion['timeline']).read_text())
     if type(start) is not int or start<0 or start>=len(rows):
         raise ValueError('motion_start_out_of_bounds')
     ticks=np.array([int(row['source_time_tick']) for row in rows],dtype=np.int64)
@@ -65,16 +67,15 @@ def _asset_timeline(asset, start, count, fps):
             raise ValueError('motion_exceeds_cache')
         j=int(np.argmin(np.abs(seconds[start:]-target)))+start
         row=rows[j]
-        if row['asset_frame']>=asset.get('frame_count',len(rows)):
+        if row['asset_frame']>=len(rows):
             raise ValueError('asset_frame_out_of_bounds')
         selected.append(dict(asset_frame=int(row['asset_frame']),source_frame=int(row['source_frame']),
                              source_time_tick=int(row['source_time_tick']),source_time_base=base))
     return selected
 
 
-def validate_scene(scene, *, asset_catalog=None):
+def validate_scene(scene):
     _exact_keys(scene,SCENE_KEYS,'scene')
-    catalog=resources()['assets'] if asset_catalog is None else asset_catalog
     if scene['schema']!=SCHEMA or re.fullmatch(r'[a-z0-9_]{1,64}',str(scene['scene_id'])) is None:
         raise ValueError('invalid_scene_id_or_schema')
     if scene['environment'] not in resources()['environments']:
@@ -88,12 +89,16 @@ def validate_scene(scene, *, asset_catalog=None):
     for p in people:
         _exact_keys(p,PERSON_KEYS,'person')
         pid=p['person_id'];ids.append(pid)
-        if type(pid) is not int or pid<=0 or p['asset'] not in catalog:
-            raise ValueError('invalid_person_or_asset')
+        if type(pid) is not int or pid<=0:
+            raise ValueError('invalid_person_id')
         if not .1<=float(p['speed_m_s'])<=4 or float(p['start_progress_m'])<0:
             raise ValueError('invalid_person_speed_or_start')
-        _asset_timeline(json.loads(Path(catalog[p['asset']]['asset_manifest']).read_text()),
-                        p['motion_start'],scene['frame_count'],scene['fps'])
+        chosen=select(p)
+        records=_asset_timeline(chosen['motion'],p['motion_start'],scene['frame_count'],scene['fps'])
+        if chosen['clothing']['kind']=='native_locked':
+            low,high=chosen['clothing']['locked_window']
+            if min(x['asset_frame'] for x in records)<low or max(x['asset_frame'] for x in records)>=high:
+                raise ValueError('native_clothing_source_window_out_of_bounds')
         for k in range(scene['frame_count']):
             _curve(p['route_xy_m'],p['start_progress_m']+p['speed_m_s']*k/scene['fps'])
     if len(ids)!=len(set(ids)):
@@ -111,16 +116,22 @@ def validate_scene(scene, *, asset_catalog=None):
     return scene
 
 
-def compile_scene(scene):
+def compile_scene(scene,selected_frames=None):
     """Resolve assets once and calculate one shared body state for all rigs."""
     validate_scene(scene)
-    catalog=resources()['assets']
     environment=json.loads(Path(resources()['environments'][scene['environment']]['scene_config']).read_text())
     count=scene['frame_count'];fps=scene['fps']
+    selected=list(range(count)) if selected_frames is None else list(selected_frames)
+    if not selected or selected!=sorted(set(selected)) or any(type(k) is not int or not 0<=k<count for k in selected):
+        raise ValueError('invalid_selected_frames')
     matrices=np.empty((count,len(scene['people']),4,4),dtype=np.float64)
     timelines={};people=[];faces_ref=None
     for j,p in enumerate(scene['people']):
-        descriptor=catalog[p['asset']]
+        chosen=select(p)
+        source_records=_asset_timeline(chosen['motion'],p['motion_start'],count,fps)
+        needed=[source_records[k]['asset_frame'] for k in selected]
+        descriptor=build(p,needed)
+        source_first=min(needed);source_last=max(needed)
         asset_path=Path(descriptor['asset_manifest'])
         asset=json.loads(asset_path.read_text())
         paths=geometry_paths(asset)
@@ -130,8 +141,9 @@ def compile_scene(scene):
             raise ValueError('invalid_smplx_geometry')
         if faces_ref is None:faces_ref=np.array(faces)
         elif not np.array_equal(faces_ref,faces):raise ValueError('asset_face_order_conflict')
-        records=_asset_timeline(asset,p['motion_start'],count,fps)
-        last=max(row['asset_frame'] for row in records)
+        records=[dict(row,asset_frame=(row['asset_frame']-source_first if
+                 source_first<=row['asset_frame']<=source_last else None)) for row in source_records]
+        last=source_last-source_first
         cloth=np.load(paths['cloth_vertices'],mmap_mode='r')
         cloth_faces=np.load(paths['cloth_faces'],mmap_mode='r')
         head=np.load(paths['head_transforms'],mmap_mode='r')
@@ -147,17 +159,17 @@ def compile_scene(scene):
                ('points.npy','active_curve_mask.npy','curve_offsets.npy')):
             raise ValueError('missing_groom_geometry')
         timelines[str(p['person_id'])]=records
-        person={key:descriptor[key] for key in ('asset_id','asset_manifest','placement_height_m','root_mode','support_policy')}
+        person={key:descriptor[key] for key in ('asset_id','asset_manifest','placement_height_m','root_mode','support_policy','component_ids')}
         person['support_checks']=dict(descriptor['support_checks'],
             road_object_names=environment['road_object_names'],
             road_object_prefixes=environment['road_object_prefixes'],
             road_z_tolerance_m=environment['road_z_tolerance_m'])
         person['person_id']=p['person_id']
-        person['source_manifest_id']=str(asset_path.resolve())
+        person['source_manifest_id']=descriptor['source_manifest_id']
         people.append(person)
         source_roots=None
         if descriptor['root_mode']=='source_root_relative_to_start_plus_fixed_scene_matrix':
-            with np.load(asset['parameters'],allow_pickle=False) as parameters:
+            with np.load(chosen['motion']['parameters'],allow_pickle=False) as parameters:
                 source_roots=np.asarray(parameters['source_root_relative'])
         for k in range(count):
             xy,tangent=_curve(p['route_xy_m'],p['start_progress_m']+p['speed_m_s']*k/fps)
@@ -166,7 +178,7 @@ def compile_scene(scene):
             M[:3,:3]=[[-ty,0,tx],[tx,0,ty],[0,1,0]]
             M[:3,3]=[xy[0],xy[1],descriptor['placement_height_m']]
             if source_roots is not None:
-                delta=source_roots[records[k]['asset_frame']]-source_roots[records[0]['asset_frame']]
+                delta=source_roots[source_records[k]['asset_frame']]-source_roots[source_records[0]['asset_frame']]
                 horizontal=np.array([delta[0],0,delta[2]])
                 M[:2,3]-=(M[:3,:3]@horizontal)[:2]
             matrices[k,j]=M

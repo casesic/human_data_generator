@@ -22,7 +22,7 @@ def _task_path(name,preview=False):
 
 
 def plan(scene_path,frames=None,rigs=None,preview=False):
-    from human_data_generator.runtime.scene import read_scene,compile_scene
+    from human_data_generator.runtime.scene import read_scene
     scene=read_scene(scene_path)
     selected=list(range(scene['frame_count'])) if frames is None else list(frames)
     rig_ids=[r['rig_id'] for r in scene['rigs'] if rigs is None or r['rig_id'] in rigs]
@@ -35,9 +35,8 @@ def plan(scene_path,frames=None,rigs=None,preview=False):
     from human_data_generator.editor.core import validate
     check=validate(scene,selected,rig_ids)
     if check['status']!='passed':raise ValueError(check['errors'])
-    people,_,_=compile_scene(scene)
     return dict(scene_id=scene['scene_id'],fps=scene['fps'],frame_count=scene['frame_count'],
-                selected_frames=selected,rig_ids=rig_ids,person_ids=[p['person_id'] for p in people],
+                selected_frames=selected,rig_ids=rig_ids,person_ids=[p['person_id'] for p in scene['people']],
                 camera_calls=len(selected)*len(rig_ids)*2,
                 scope='complete' if selected==list(range(scene['frame_count'])) else 'selected')
 

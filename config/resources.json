@@ -1,85 +1,7 @@
 {
-  "schema": "human_data_resources_v2",
+  "schema": "human_data_resources_v3",
   "mamma_template": "/home/yy/Repos/mamma/data/body_models/downsampled_verts/verts_512.pkl",
   "blender_executable": "/mnt/data1/khb/app/blender-5.1.1-linux-x64/blender",
-  "assets": {
-    "city_motion_1": {
-      "asset_id": "compose_a1_11_M01_APD6526_M02_simple_M01_groom_M01_APD6526",
-      "asset_manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/seeded_cycling_team_a1_20261010/team_assets/person1_asset_adapter.json",
-      "placement_height_m": 1.2493,
-      "root_mode": "fixed_pelvis_scene_owns_progression",
-      "support_policy": "fixed_scene_placement_height_no_pedestrian_foot_contact",
-      "support_checks": {
-        "body_min_clearance_m": [
-          0.05,
-          0.7
-        ],
-        "pelvis_height_above_road_m": [
-          1.1993,
-          1.2993000000000001
-        ]
-      }
-    },
-    "city_motion_2": {
-      "asset_id": "compose_a1_12_M02_p1_comfortable_M01_simple_F02_groom_M02_p1_comfortable",
-      "asset_manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/seeded_cycling_team_a1_20261010/team_assets/person2_asset_adapter.json",
-      "placement_height_m": 1.1571,
-      "root_mode": "fixed_pelvis_scene_owns_progression",
-      "support_policy": "fixed_scene_placement_height_no_pedestrian_foot_contact",
-      "support_checks": {
-        "body_min_clearance_m": [
-          0.05,
-          0.7
-        ],
-        "pelvis_height_above_road_m": [
-          1.1071,
-          1.2071
-        ]
-      }
-    },
-    "city_motion_3": {
-      "asset_id": "compose_a1_13_F02_p2_straight_F02_simple_F02_groom_F02_p2_straight",
-      "asset_manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/seeded_cycling_team_a1_20261010/team_assets/person3_asset_adapter.json",
-      "placement_height_m": 1.1253,
-      "root_mode": "fixed_pelvis_scene_owns_progression",
-      "support_policy": "fixed_scene_placement_height_no_pedestrian_foot_contact",
-      "support_checks": {
-        "body_min_clearance_m": [
-          0.05,
-          0.7
-        ],
-        "pelvis_height_above_road_m": [
-          1.0753,
-          1.1753
-        ]
-      }
-    },
-    "riverfront_motion_1": {
-      "asset_id": "cycling_M01_v2_APD6526_30_106_simple_v1",
-      "asset_manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_roi_integration_a1_20261009/plan/cycling_m01_road_pass/asset_adapter.json",
-      "placement_height_m": 1.2,
-      "root_mode": "fixed_pelvis_scene_owns_progression",
-      "support_policy": "fixed_scene_placement_height_no_pedestrian_foot_contact",
-      "support_checks": {
-        "body_min_clearance_m": [
-          0.05,
-          0.7
-        ],
-        "pelvis_height_above_road_m": [
-          1.0,
-          1.6
-        ]
-      }
-    },
-    "city_walk_m03": {
-      "asset_id": "compose_M03_KIT11_walk_M03_KIT11_walk",
-      "asset_manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/walking_composition_a2_20261010/builds/M03_KIT11_walk/a1_walking_view.json",
-      "placement_height_m": 0.941238284111023,
-      "root_mode": "source_root_relative_to_start_plus_fixed_scene_matrix",
-      "support_policy": "pedestrian_source_root_constant_lift",
-      "support_checks": {}
-    }
-  },
   "environments": {
     "city": {
       "scene_config": "/mnt/data1/yy/home/yy/Projects/human_data_generator/config/environments/city.json",
@@ -135,5 +57,11 @@
         "filter_width": 1.5
       }
     }
+  },
+  "component_catalog": {
+    "bodies": "/mnt/data1/yy/home/yy/Projects/human_data_generator/config/catalog/bodies.json",
+    "motions": "/mnt/data1/yy/home/yy/Projects/human_data_generator/config/catalog/motions.json",
+    "clothing": "/mnt/data1/yy/home/yy/Projects/human_data_generator/config/catalog/clothing.json",
+    "hair": "/mnt/data1/yy/home/yy/Projects/human_data_generator/config/catalog/hair.json"
   }
 }

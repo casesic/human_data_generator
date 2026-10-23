@@ -1,0 +1,121 @@
+{
+  "schema": "human_components_v1",
+  "items": {
+    "APD6526": {
+      "version": "fit_attempt_2",
+      "parameters": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/apd_6526_smplx_pilot_20261008/fit_attempt_2/parameters.npz",
+      "timeline": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/continuous_cycling_asset_a2_20261009/accepted/timeline.json",
+      "fitted_body": "M01",
+      "source_group": "APD_5724486_v1_identity_session_unknown",
+      "root_mode": "fixed_pelvis_scene_owns_progression",
+      "license": "APD CC BY; see source delivery",
+      "status": "ready",
+      "behavior": "ride"
+    },
+    "bikefit": {
+      "version": "fit_attempt_1_F02_derivation",
+      "parameters": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/mtb_f02_dressed_asset_a2_20261009/parameters.npz",
+      "timeline": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/mtb_f02_dressed_asset_a2_20261009/timeline.json",
+      "fitted_body": "F02",
+      "source_group": "bikefit_XBLMidr4dps",
+      "root_mode": "fixed_pelvis_scene_owns_progression",
+      "license": "unknown; internal integration only",
+      "status": "ready",
+      "behavior": "ride"
+    },
+    "p2_straight": {
+      "version": "fit_attempt_1",
+      "parameters": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/bvh_p2_smplx_pilot_a2_20261010/fit_attempt_1/parameters.npz",
+      "timeline": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/bvh_p2_dressed_asset_a2_20261010/timeline.json",
+      "fitted_body": "M01",
+      "source_group": "zenodo_10668611_participant_2",
+      "root_mode": "fixed_pelvis_scene_owns_progression",
+      "license": "CC BY 4.0; Kyriakou et al.",
+      "status": "ready",
+      "behavior": "ride"
+    },
+    "p1_comfortable": {
+      "version": "fit_attempt_1",
+      "parameters": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/bvh_p1_smplx_pilot_a2_20261010/p1_comfortable/fit_attempt_1/parameters.npz",
+      "timeline": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/bvh_p1_dressed_assets_a2_20261010/p1_comfortable/timeline.json",
+      "fitted_body": "M02",
+      "source_group": "zenodo_10668611_participant_1",
+      "root_mode": "fixed_pelvis_scene_owns_progression",
+      "license": "CC BY 4.0; Kyriakou et al.",
+      "status": "ready",
+      "behavior": "ride"
+    },
+    "p1_alternate": {
+      "version": "fit_attempt_1",
+      "parameters": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/bvh_p1_smplx_pilot_a2_20261010/p1_alternate/fit_attempt_1/parameters.npz",
+      "timeline": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/bvh_p1_dressed_assets_a2_20261010/p1_alternate/timeline.json",
+      "fitted_body": "M02",
+      "source_group": "zenodo_10668611_participant_1",
+      "root_mode": "fixed_pelvis_scene_owns_progression",
+      "license": "CC BY 4.0; Kyriakou et al.",
+      "status": "ready",
+      "behavior": "ride"
+    },
+    "KIT425_walk": {
+      "version": "published_bedlam2_30hz_127f_M04_derivation",
+      "parameters": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/pedestrian_seeded_pilot_a1_20261009/assets_attempt_2/cycling_M04_v1/parameters.npz",
+      "timeline": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/walking_composition_a2_20261010/kit425_source_timeline.json",
+      "fitted_body": "M04",
+      "source_group": "KIT_425_walking_medium05",
+      "root_mode": "source_root_relative_to_start_plus_fixed_scene_matrix",
+      "root_reference_source_frame": 9,
+      "expression_policy": "neutral_zero_missing",
+      "license": "see BEDLAM2/KIT source terms; integration only",
+      "status": "ready",
+      "behavior": "walk"
+    },
+    "KIT11_walk": {
+      "version": "BEDLAM2_nl_2066_3XL_2205_published30Hz_M03_derivation_v1",
+      "parameters": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/walking_composition_a2_20261010/normalized_KIT11_M03/parameters.npz",
+      "timeline": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/walking_composition_a2_20261010/normalized_KIT11_M03/timeline.json",
+      "fitted_body": "M03",
+      "source_group": "KIT_11_WalkingStraightForwards05_BEDLAM2_nl_2066_3XL_2205",
+      "root_mode": "source_root_relative_to_start_plus_fixed_scene_matrix",
+      "root_reference_source_frame": 0,
+      "license": "BEDLAM2 non-commercial scientific research; see official source license",
+      "status": "ready",
+      "behavior": "walk"
+    },
+    "KIT314_walk_raw": {
+      "status": "raw_only",
+      "behavior": "walk",
+      "reason": "source index found; converted SMPL-X parameters and verified timeline absent",
+      "source": "BEDLAM2/AMASS candidate index, see walking composition report"
+    },
+    "SOMA1_walk_raw": {
+      "status": "raw_only",
+      "behavior": "walk",
+      "reason": "source index found; converted SMPL-X parameters and verified timeline absent",
+      "source": "BEDLAM2/AMASS candidate index, see walking composition report"
+    },
+    "SOMA2_walk_raw": {
+      "status": "raw_only",
+      "behavior": "walk",
+      "reason": "source index found; converted SMPL-X parameters and verified timeline absent",
+      "source": "BEDLAM2/AMASS candidate index, see walking composition report"
+    },
+    "APD6526_fit_attempt_1": {
+      "version": "fit_attempt_1",
+      "parameters": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/apd_6526_smplx_pilot_20261008/fit_attempt_1/parameters.npz",
+      "status": "superseded",
+      "behavior": "ride",
+      "source_group": "APD_5724486_v1_identity_session_unknown",
+      "reason": "earlier fit of APD6526; accepted fit_attempt_2 is the current converted version",
+      "license": "APD CC BY; see source delivery"
+    },
+    "bikefit_early_derivation": {
+      "version": "cycling_female_asset_a2",
+      "parameters": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_female_asset_a2_20261009/parameters.npz",
+      "status": "superseded",
+      "behavior": "ride",
+      "source_group": "bikefit_XBLMidr4dps",
+      "reason": "earlier derivative of bikefit; current F02 derivation and timeline are listed as bikefit",
+      "license": "unknown; internal integration only"
+    }
+  }
+}

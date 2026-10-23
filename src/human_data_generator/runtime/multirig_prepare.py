@@ -41,7 +41,7 @@ def prepare(output, *, scene_path, frame_indices=None, selected_rig_ids=None,
     if check['status']!='passed':raise ValueError(check['errors'])
     resource=resources()
     environment=resource['environments'][scene['environment']]
-    people,timelines,matrices=compile_scene(scene)
+    people,timelines,matrices=compile_scene(scene,frames)
     template=Path(resource['mamma_template'])
     ordered_vertex_ids(template)
     recipe=dict(schema='human_run_v1',scene_episode_id=scene['scene_id'],episode_id=scene['scene_id'],
@@ -49,7 +49,7 @@ def prepare(output, *, scene_path, frame_indices=None, selected_rig_ids=None,
                 scene=environment['scene_config'],scene_matrices_ref=str(output/'scene_matrices.npy'),
                 geometry_acceptance='passed',road_height_m=0,
                 render=dict(source_resolution=[5760,2880],samples=64,seed=scene['seed']))
-    bodies=person_geometry(recipe)
+    bodies=person_geometry(recipe,frames)
     from human_data_generator.editor.core import map_data
     roads=map_data(scene['environment'])['roads']
     world_parts={}

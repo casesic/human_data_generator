@@ -6,6 +6,7 @@ from pathlib import Path
 import random
 
 from human_data_generator.config import PROJECT_ROOT
+from human_data_generator.components import describe
 from human_data_generator.editor.core import default_scene,validate,write
 
 
@@ -20,15 +21,22 @@ def sample_scene(rule,seed,index):
     scene=default_scene('riverfront' if rule.startswith('riverfront') else 'city')
     scene['scene_id']=f'batch_{index:03d}_{rule}'
     scene['seed']=_rng(seed,index,'render').randrange(1,2**31)
+    inventory=describe()
+    def choose(kind,purpose,behavior=None):
+        items=sorted(row['id'] for row in inventory[kind] if row['status']=='ready' and
+                     (kind!='bodies' or row['default_version']) and
+                     (kind!='clothing' or row['kind']=='simple_barycentric') and
+                     (behavior is None or row['behavior']==behavior))
+        if not items:raise ValueError('no_usable_batch_component:'+kind)
+        return _rng(seed,index,purpose).choice(items)
     rng=_rng(seed,index,'trajectory')
     if rule=='city_single_walk':
-        scene['people'][0]['asset']='city_walk_m03'
         scene['people'][0]['route_xy_m']=[[rng.uniform(-1.0,1.0),77.96],[rng.uniform(-1.0,1.0),92]]
         scene['people'][0]['speed_m_s']=rng.uniform(.8,1.3)
     elif rule=='city_crossing_pair':
         first=scene['people'][0]
         first['route_xy_m']=[[-1.4,77.96],[-1.4,91]]
-        second=dict(person_id=2,asset='city_motion_2',motion_start=0,
+        second=dict(person_id=2,body='M02',motion='p1_comfortable',clothing='M02_simple',hair='M02_groom',motion_start=0,
                     route_xy_m=[[1.4,82],[1.4,72]],speed_m_s=rng.uniform(.9,1.3),
                     start_progress_m=rng.uniform(0,.4))
         scene['people'].append(second)
@@ -37,7 +45,12 @@ def sample_scene(rule,seed,index):
         person['speed_m_s']=rng.uniform(.9,1.4)
         person['start_progress_m']=rng.uniform(0,.4)
     motion_rng=_rng(seed,index,'motion_start')
-    for person in scene['people']:
+    for person_index,person in enumerate(scene['people']):
+        purpose=f'person_{person_index}'
+        person['body']=choose('bodies',purpose+'_body')
+        person['motion']=choose('motions',purpose+'_motion','walk' if rule=='city_single_walk' else 'ride')
+        person['clothing']=choose('clothing',purpose+'_clothing')
+        person['hair']=choose('hair',purpose+'_hair')
         person['motion_start']=motion_rng.randint(0,4)
     camera_rng=_rng(seed,index,'camera')
     for rig in scene['rigs']:

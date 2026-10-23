@@ -32,7 +32,7 @@ input,select,textarea{width:100%}input[type=number]{max-width:150px}input[type=r
 <div id="status"></div><div><img id="cam2"><img id="cam4"></div>
 </section></main>
 <script>
-const $=id=>document.getElementById(id);let scene,map,assets={},frame=0,view={x:0,y:80,s:9},drag=null;
+const $=id=>document.getElementById(id);let scene,map,components={},frame=0,view={x:0,y:80,s:9},drag=null;
 async function api(path,body){const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{}),v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
 function status(x){$('status').textContent=x}
 function toScreen(p){let c=$('map');return [c.clientWidth/2+(p[0]-view.x)*view.s,c.clientHeight/2-(p[1]-view.y)*view.s]}
@@ -47,13 +47,22 @@ function draw(){if(!scene||!map)return;let c=$('map'),d=devicePixelRatio||1;c.wi
 function sync(){scene.scene_id=$('sceneId').value;scene.seed=Number($('seed').value);scene.fps=Number($('fps').value);scene.frame_count=Number($('frameCount').value);frame=Math.min(frame,scene.frame_count-1);$('frame').max=scene.frame_count-1;$('frame').value=frame;$('frameLabel').textContent=frame+' / '+(frame/scene.fps).toFixed(2)+' 秒';draw()}
 function refresh(){if(!scene)return;$('environment').value=scene.environment;$('sceneId').value=scene.scene_id;$('seed').value=scene.seed;$('fps').value=scene.fps;$('frameCount').value=scene.frame_count;
  $('people').innerHTML='';scene.people.forEach((p,j)=>{let box=document.createElement('div');box.className='card';box.innerHTML='<b>人物 '+p.person_id+'</b> <button data-remove>移除</button>'+
- '<label>动作资产</label><select data-asset></select><div class="row"><div><label>动作起始帧</label><input data-start type="number" min="0"></div><div><label>速度 m/s</label><input data-speed type="number" min="0.1" max="4" step="0.1"></div></div>'+
+ '<label>人物身体</label><select data-body></select><label>动作</label><select data-motion></select><label>衣物</label><select data-clothing></select><label>发型</label><select data-hair></select><div class="muted" data-compat></div><div class="row"><div><label>动作起始帧</label><input data-start type="number" min="0"></div><div><label>速度 m/s</label><input data-speed type="number" min="0.1" max="4" step="0.1"></div></div>'+
  '<label>路线起点进度 m</label><input data-progress type="number" min="0" step="0.1">'+
  '<label>路线控制点 XY（每行一组，米）</label><textarea data-route rows="3"></textarea>';
- let select=box.querySelector('[data-asset]');assets.forEach(k=>select.add(new Option(k,k)));select.value=p.asset;
+ for(const [field,kind] of [['body','bodies'],['motion','motions'],['clothing','clothing'],['hair','hair']]){
+   let select=box.querySelector('[data-'+field+']');for(const item of components[kind]){
+     let option=new Option(item.id+(item.status==='ready'?'':' · '+item.status),item.id);
+     option.disabled=item.status!=='ready';option.title=item.reason||'';select.add(option)}
+   select.value=p[field];select.onchange=()=>{p[field]=select.value;details();draw()}}
+ function details(){let m=components.motions.find(x=>x.id===p.motion),c=components.clothing.find(x=>x.id===p.clothing);
+   box.querySelector('[data-start]').max=m?m.available_frames-1:0;
+   let warning=c&&c.kind==='native_locked'?'此衣物仅限 '+c.locked_body+' + '+c.locked_motion+'，源帧 '+c.locked_window.join('–')+'；发型可单独选择。'+(p.body!==c.locked_body||p.motion!==c.locked_motion?'当前组合不受支持。':''):'';
+   box.querySelector('[data-compat]').textContent=(m?'动作源帧 '+m.first_source_frame+'–'+m.last_source_frame+'；有效起点 0–'+(m.available_frames-1)+'，实际可用时长还取决于场景帧率和帧数。简单衣物按目标身体重绑；发型按目标头皮转移。':'')+warning}
+ details();
  box.querySelector('[data-start]').value=p.motion_start;box.querySelector('[data-speed]').value=p.speed_m_s;box.querySelector('[data-progress]').value=p.start_progress_m;
  box.querySelector('[data-route]').value=p.route_xy_m.map(q=>q.join(', ')).join('\n');
- select.onchange=()=>{p.asset=select.value;draw()};box.querySelector('[data-start]').onchange=e=>p.motion_start=Number(e.target.value);
+ box.querySelector('[data-start]').onchange=e=>p.motion_start=Number(e.target.value);
  box.querySelector('[data-speed]').onchange=e=>p.speed_m_s=Number(e.target.value);box.querySelector('[data-progress]').onchange=e=>p.start_progress_m=Number(e.target.value);
  box.querySelector('[data-route]').onchange=e=>{p.route_xy_m=e.target.value.trim().split('\n').map(line=>line.split(',').map(Number));draw()};
  box.querySelector('[data-remove]').onclick=()=>{if(scene.people.length<=1)return;scene.people.splice(j,1);refresh()};
@@ -63,9 +72,10 @@ function refresh(){if(!scene)return;$('environment').value=scene.environment;$('
  for(const [field,value,apply] of [['x',r.origin_m[0],v=>r.origin_m[0]=v],['y',r.origin_m[1],v=>r.origin_m[1]=v],['yaw',r.yaw_deg,v=>r.yaw_deg=v]]){let el=box.querySelector('[data-'+field+']');el.value=value;el.onchange=e=>{apply(Number(e.target.value));draw()}}
  box.querySelector('[data-remove]').onclick=()=>{if(scene.rigs.length<=1)return;scene.rigs.splice(j,1);refresh()};$('rigs').append(box)});
  $('previewRig').replaceChildren(...scene.rigs.map(r=>new Option(r.rig_id,r.rig_id)));sync()}
-async function open(environment){scene=await api('/api/example?environment='+environment);map=await api('/api/map?environment='+environment);assets=await api('/api/assets');view=environment==='city'?{x:0,y:81,s:9}:{x:0,y:2,s:14};frame=0;refresh()}
+async function open(environment){scene=await api('/api/example?environment='+environment);map=await api('/api/map?environment='+environment);components=await api('/api/components');view=environment==='city'?{x:0,y:81,s:9}:{x:0,y:2,s:14};frame=0;refresh()}
+async function changeEnvironment(environment){scene.environment=environment;map=await api('/api/map?environment='+environment);view=environment==='city'?{x:0,y:81,s:9}:{x:0,y:2,s:14};refresh();status('环境已切换；人物四类组件保留。请检查路线与机位位置。')}
 for(const id of ['sceneId','seed','fps','frameCount'])$(id).onchange=sync;
-$('frame').oninput=e=>{frame=Number(e.target.value);sync()};$('environment').onchange=e=>open(e.target.value).catch(x=>status(x.message));
+$('frame').oninput=e=>{frame=Number(e.target.value);sync()};$('environment').onchange=e=>changeEnvironment(e.target.value).catch(x=>status(x.message));
 $('addPerson').onclick=()=>{let n=Math.max(...scene.people.map(p=>p.person_id))+1,base=scene.people[0];scene.people.push({...structuredClone(base),person_id:n,route_xy_m:base.route_xy_m.map(([x,y])=>[x+n,y])});refresh()};
 $('addRig').onclick=()=>{let n=1;while(scene.rigs.some(r=>r.rig_id==='rig_custom_'+n))n++;let r=structuredClone(scene.rigs[0]);r.rig_id='rig_custom_'+n;r.origin_m[0]+=n;scene.rigs.push(r);refresh()};
 $('check').onclick=async()=>{try{sync();status(JSON.stringify(await api('/api/check',{scene}),null,2))}catch(e){status(e.message)}};

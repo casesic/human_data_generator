@@ -1,0 +1,326 @@
+{
+  "schema": "human_components_v1",
+  "items": {
+    "F01_simple": {
+      "version": "simple_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F01_v2/reference/simple_clothing_v1",
+      "reference_body": "F01",
+      "status": "ready",
+      "kind": "simple_barycentric",
+      "license": "see character manifest",
+      "offset_m": 0.004
+    },
+    "F02_simple": {
+      "version": "simple_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F02_v3/reference/simple_clothing_v1",
+      "reference_body": "F02",
+      "status": "ready",
+      "kind": "simple_barycentric",
+      "license": "see character manifest",
+      "offset_m": 0.004
+    },
+    "F03_simple": {
+      "version": "simple_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F03_v1/reference/simple_clothing_v1",
+      "reference_body": "F03",
+      "status": "ready",
+      "kind": "simple_barycentric",
+      "license": "see character manifest",
+      "offset_m": 0.004
+    },
+    "F04_v1_simple": {
+      "version": "simple_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F04_v1/reference/simple_clothing_v1",
+      "reference_body": "F04_v1",
+      "status": "ready",
+      "kind": "simple_barycentric",
+      "license": "see character manifest",
+      "offset_m": 0.004
+    },
+    "F05_v1_simple": {
+      "version": "simple_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F05_v1/reference/simple_clothing_v1",
+      "reference_body": "F05_v1",
+      "status": "ready",
+      "kind": "simple_barycentric",
+      "license": "see character manifest",
+      "offset_m": 0.004
+    },
+    "M01_simple": {
+      "version": "simple_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M01_v2/reference/simple_clothing_v1",
+      "reference_body": "M01",
+      "status": "ready",
+      "kind": "simple_barycentric",
+      "license": "see character manifest",
+      "offset_m": 0.004
+    },
+    "M02_simple": {
+      "version": "simple_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M02_v3/reference/simple_clothing_v1",
+      "reference_body": "M02",
+      "status": "ready",
+      "kind": "simple_barycentric",
+      "license": "see character manifest",
+      "offset_m": 0.004
+    },
+    "M03_simple": {
+      "version": "simple_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M03_v1/reference/simple_clothing_v1",
+      "reference_body": "M03",
+      "status": "ready",
+      "kind": "simple_barycentric",
+      "license": "see character manifest",
+      "offset_m": 0.004
+    },
+    "M04_simple": {
+      "version": "simple_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M04_v1/reference/simple_clothing_v1",
+      "reference_body": "M04",
+      "status": "ready",
+      "kind": "simple_barycentric",
+      "license": "see character manifest",
+      "offset_m": 0.004
+    },
+    "M05_simple": {
+      "version": "simple_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M05_v1/reference/simple_clothing_v1",
+      "reference_body": "M05",
+      "status": "ready",
+      "kind": "simple_barycentric",
+      "license": "see character manifest",
+      "offset_m": 0.004
+    },
+    "M02_commuter_clothing_v1": {
+      "version": "commuter_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_M02_v2/reference/commuter_clothing_v1",
+      "reference_body": "M02_v2",
+      "status": "needs_conversion",
+      "kind": "legacy_commuter_binding",
+      "reason": "current simple barycentric renderer has no verified binding/material conversion",
+      "license": "see source character manifest"
+    },
+    "M02_commuter_clothing_v2": {
+      "version": "commuter_clothing_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_M02_v2/reference/commuter_clothing_v2",
+      "reference_body": "M02_v2",
+      "status": "needs_conversion",
+      "kind": "legacy_commuter_binding",
+      "reason": "current simple barycentric renderer has no verified binding/material conversion",
+      "license": "see source character manifest"
+    },
+    "M02_commuter_clothing_v3": {
+      "version": "commuter_clothing_v3",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_M02_v2/reference/commuter_clothing_v3",
+      "reference_body": "M02_v2",
+      "status": "needs_conversion",
+      "kind": "legacy_commuter_binding",
+      "reason": "current simple barycentric renderer has no verified binding/material conversion",
+      "license": "see source character manifest"
+    },
+    "M02_commuter_clothing_v4": {
+      "version": "commuter_clothing_v4",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_M02_v2/reference/commuter_clothing_v4",
+      "reference_body": "M02_v2",
+      "status": "needs_conversion",
+      "kind": "legacy_commuter_binding",
+      "reason": "current simple barycentric renderer has no verified binding/material conversion",
+      "license": "see source character manifest"
+    },
+    "F02_commuter_clothing_v1": {
+      "version": "commuter_clothing_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_F02_v2/reference/commuter_clothing_v1",
+      "reference_body": "F02_v2",
+      "status": "needs_conversion",
+      "kind": "legacy_commuter_binding",
+      "reason": "current simple barycentric renderer has no verified binding/material conversion",
+      "license": "see source character manifest"
+    },
+    "F02_commuter_clothing_v2": {
+      "version": "commuter_clothing_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_F02_v2/reference/commuter_clothing_v2",
+      "reference_body": "F02_v2",
+      "status": "needs_conversion",
+      "kind": "legacy_commuter_binding",
+      "reason": "current simple barycentric renderer has no verified binding/material conversion",
+      "license": "see source character manifest"
+    },
+    "F02_commuter_clothing_v3": {
+      "version": "commuter_clothing_v3",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_F02_v2/reference/commuter_clothing_v3",
+      "reference_body": "F02_v2",
+      "status": "needs_conversion",
+      "kind": "legacy_commuter_binding",
+      "reason": "current simple barycentric renderer has no verified binding/material conversion",
+      "license": "see source character manifest"
+    },
+    "F02_commuter_clothing_v4": {
+      "version": "commuter_clothing_v4",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_F02_v2/reference/commuter_clothing_v4",
+      "reference_body": "F02_v2",
+      "status": "needs_conversion",
+      "kind": "legacy_commuter_binding",
+      "reason": "current simple barycentric renderer has no verified binding/material conversion",
+      "license": "see source character manifest"
+    },
+    "M03_KIT11_BEDLAM_transfer": {
+      "version": "transfer_attempt_1_user_accepted_20261010",
+      "reference_body": "M03",
+      "kind": "native_locked",
+      "transfer": "precomputed_fixed_correspondence_no_new_simulation",
+      "license": "BEDLAM2 non-commercial research; see official license",
+      "locked_body": "M03",
+      "locked_motion": "KIT11_walk",
+      "locked_window": [
+        0,
+        120
+      ],
+      "locked_asset_id": "M03_KIT11_gr_eric_033_3XL_transfer_candidate",
+      "asset_manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/bedlam_m03_native_cloth_transfer_a2_20261010/builds/M03_KIT11_BEDLAM_native/delivery_manifest.json",
+      "status": "ready",
+      "reason": "only M03 + KIT11_walk source frames [0,120); hair remains independently selectable"
+    },
+    "BEDLAM_native_locked_example": {
+      "version": "native_locked",
+      "reference_body": "BEDLAM_native",
+      "kind": "native_simulated_cache_locked_body_motion_time",
+      "transfer": "unsupported_motion_swap",
+      "license": "see BEDLAM native pilot",
+      "status": "raw_only",
+      "reason": "no current consumable sequence"
+    },
+    "F01_v1_shell": {
+      "version": "clothing",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_F01_v1/reference/clothing",
+      "reference_body": "F01_v1",
+      "status": "needs_conversion",
+      "kind": "historical_shell",
+      "reason": "historical 10-beta body and old shell material/binding contract; not normalized for current 30-beta composition",
+      "license": "see source character manifest"
+    },
+    "F01_v1_clipped": {
+      "version": "clothing_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_F01_v1/reference/clothing_v2",
+      "reference_body": "F01_v1",
+      "status": "needs_conversion",
+      "kind": "historical_shell",
+      "reason": "historical 10-beta body and old shell material/binding contract; not normalized for current 30-beta composition",
+      "license": "see source character manifest"
+    },
+    "F02_v1_shell": {
+      "version": "clothing",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_F02_v1/reference/clothing",
+      "reference_body": "F02_v1",
+      "status": "needs_conversion",
+      "kind": "historical_shell",
+      "reason": "historical 10-beta body and old shell material/binding contract; not normalized for current 30-beta composition",
+      "license": "see source character manifest"
+    },
+    "F02_v1_clipped": {
+      "version": "clothing_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_F02_v1/reference/clothing_v2",
+      "reference_body": "F02_v1",
+      "status": "needs_conversion",
+      "kind": "historical_shell",
+      "reason": "historical 10-beta body and old shell material/binding contract; not normalized for current 30-beta composition",
+      "license": "see source character manifest"
+    },
+    "M01_v1_shell": {
+      "version": "clothing",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_M01_v1/reference/clothing",
+      "reference_body": "M01_v1",
+      "status": "needs_conversion",
+      "kind": "historical_shell",
+      "reason": "historical 10-beta body and old shell material/binding contract; not normalized for current 30-beta composition",
+      "license": "see source character manifest"
+    },
+    "M01_v1_clipped": {
+      "version": "clothing_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_M01_v1/reference/clothing_v2",
+      "reference_body": "M01_v1",
+      "status": "needs_conversion",
+      "kind": "historical_shell",
+      "reason": "historical 10-beta body and old shell material/binding contract; not normalized for current 30-beta composition",
+      "license": "see source character manifest"
+    },
+    "M02_v1_shell": {
+      "version": "clothing",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_M02_v1/reference/clothing",
+      "reference_body": "M02_v1",
+      "status": "needs_conversion",
+      "kind": "historical_shell",
+      "reason": "historical 10-beta body and old shell material/binding contract; not normalized for current 30-beta composition",
+      "license": "see source character manifest"
+    },
+    "M02_v1_clipped": {
+      "version": "clothing_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_M02_v1/reference/clothing_v2",
+      "reference_body": "M02_v1",
+      "status": "needs_conversion",
+      "kind": "historical_shell",
+      "reason": "historical 10-beta body and old shell material/binding contract; not normalized for current 30-beta composition",
+      "license": "see source character manifest"
+    },
+    "F02_pose_derived_plain": {
+      "version": "pose_derived_plain",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/mixed_riders_pedestrians_20260930/derivatives/cycling_F02_v3/KIT314_bend_left01_f030/simple_clothing",
+      "reference_body": "F02",
+      "status": "needs_conversion",
+      "kind": "pose_derived_simple",
+      "reason": "distinct plain/profile variant bound on a posed derivative; rest-body material/binding contract not normalized",
+      "license": "see source character manifest"
+    },
+    "M03_pose_derived_plain": {
+      "version": "pose_derived_plain",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/source_isolated_pilot_20260930/assets/derivatives/cycling_M03_v1/KIT425_walking_medium05_f120/simple_clothing",
+      "reference_body": "M03",
+      "status": "needs_conversion",
+      "kind": "pose_derived_simple",
+      "reason": "distinct plain/profile variant bound on a posed derivative; rest-body material/binding contract not normalized",
+      "license": "see source character manifest"
+    },
+    "F05_pose_derived_plain": {
+      "version": "pose_derived_plain",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/source_isolated_pilot_20260930/assets/derivatives/cycling_F05_v2/KIT314_bend_left01_f000/simple_clothing",
+      "reference_body": "F05",
+      "status": "needs_conversion",
+      "kind": "pose_derived_simple",
+      "reason": "distinct plain/profile variant bound on a posed derivative; rest-body material/binding contract not normalized",
+      "license": "see source character manifest"
+    },
+    "F03_pose_derived_plain": {
+      "version": "pose_derived_plain",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/source_isolated_pilot_20260930/assets/derivatives/cycling_F03_v1/KIT314_bend_left01_f000/simple_clothing",
+      "reference_body": "F03",
+      "status": "needs_conversion",
+      "kind": "pose_derived_simple",
+      "reason": "distinct plain/profile variant bound on a posed derivative; rest-body material/binding contract not normalized",
+      "license": "see source character manifest"
+    },
+    "M05_pose_derived_plain": {
+      "version": "pose_derived_plain",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/source_isolated_pilot_20260930/assets/derivatives/cycling_M05_v1/KIT314_bend_left01_f060/simple_clothing",
+      "reference_body": "M05",
+      "status": "needs_conversion",
+      "kind": "pose_derived_simple",
+      "reason": "distinct plain/profile variant bound on a posed derivative; rest-body material/binding contract not normalized",
+      "license": "see source character manifest"
+    },
+    "coco_292226_person_1330527_early_clothing": {
+      "version": "early_clothing_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_clothing_20260929_v2/coco_292226_person_1330527",
+      "status": "raw_only",
+      "kind": "early_photo_derivative",
+      "reason": "old photo-derived shell has no current 30-beta target body and material contract",
+      "license": "see source manifest"
+    },
+    "coco_306800_person_225160_early_clothing": {
+      "version": "early_clothing_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_clothing_20260929_v2/coco_306800_person_225160",
+      "status": "raw_only",
+      "kind": "early_photo_derivative",
+      "reason": "old photo-derived shell has no current 30-beta target body and material contract",
+      "license": "see source manifest"
+    }
+  }
+}

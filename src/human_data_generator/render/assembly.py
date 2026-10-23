@@ -100,7 +100,7 @@ def main(*, render_cameras_fn=None, frame_complete_fn=None, frame_source_dir_fn=
         asset=json.loads(Path(p['asset_manifest']).read_text());g=geometry_paths(asset);v=np.load(g['body_vertices'],mmap_mode='r')
         matrices=shared_matrices[:,person_index]
         asset_frames=[row['asset_frame'] for row in ep['person_timelines'][str(p['person_id'])]]
-        if any(type(ix)is not int or not 0<=ix<len(v) for ix in asset_frames):raise ValueError('asset_frame_out_of_bounds')
+        if any(type(asset_frames[k]) is not int or not 0<=asset_frames[k]<len(v) for k in job['frames']):raise ValueError('asset_frame_out_of_bounds')
         bounds=support_limits(p);cycling=p['root_mode']==ROOT_MODE
         for k in job['frames']:
             M=matrices[k]

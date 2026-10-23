@@ -1,0 +1,161 @@
+{
+  "schema": "human_components_v1",
+  "items": {
+    "F01": {
+      "version": "F01_v2",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F01_v2/manifest.json",
+      "family": "cycling_F01",
+      "default_version": true,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "F02": {
+      "version": "F02_v3",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F02_v3/manifest.json",
+      "family": "cycling_F02",
+      "default_version": true,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "F03": {
+      "version": "F03_v1",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F03_v1/manifest.json",
+      "family": "cycling_F03",
+      "default_version": true,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "F04_v1": {
+      "version": "F04_v1",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F04_v1/manifest.json",
+      "family": "cycling_F04",
+      "default_version": false,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "F04_v2": {
+      "version": "F04_v2",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F04_v2/manifest.json",
+      "family": "cycling_F04",
+      "default_version": false,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "F04": {
+      "version": "F04_v3",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F04_v3/manifest.json",
+      "family": "cycling_F04",
+      "default_version": true,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "F05_v1": {
+      "version": "F05_v1",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F05_v1/manifest.json",
+      "family": "cycling_F05",
+      "default_version": false,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "F05": {
+      "version": "F05_v2",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F05_v2/manifest.json",
+      "family": "cycling_F05",
+      "default_version": true,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "M01": {
+      "version": "M01_v2",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M01_v2/manifest.json",
+      "family": "cycling_M01",
+      "default_version": true,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "M02": {
+      "version": "M02_v3",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M02_v3/manifest.json",
+      "family": "cycling_M02",
+      "default_version": true,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "M03": {
+      "version": "M03_v1",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M03_v1/manifest.json",
+      "family": "cycling_M03",
+      "default_version": true,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "M04": {
+      "version": "M04_v1",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M04_v1/manifest.json",
+      "family": "cycling_M04",
+      "default_version": true,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "M05": {
+      "version": "M05_v1",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M05_v1/manifest.json",
+      "family": "cycling_M05",
+      "default_version": true,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "M02_v2": {
+      "version": "M02_v2",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_M02_v2/manifest.json",
+      "family": "cycling_M02",
+      "default_version": false,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "F02_v2": {
+      "version": "F02_v2",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_F02_v2/manifest.json",
+      "family": "cycling_F02",
+      "default_version": false,
+      "status": "ready",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "F01_v1": {
+      "version": "F01_v1",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_F01_v1/manifest.json",
+      "family": "cycling_F01",
+      "default_version": false,
+      "status": "needs_conversion",
+      "reason": "historical 10-beta character; current 30-beta composition contract not yet verified",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "F02_v1": {
+      "version": "F02_v1",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_F02_v1/manifest.json",
+      "family": "cycling_F02",
+      "default_version": false,
+      "status": "needs_conversion",
+      "reason": "historical 10-beta character; current 30-beta composition contract not yet verified",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "M01_v1": {
+      "version": "M01_v1",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_M01_v1/manifest.json",
+      "family": "cycling_M01",
+      "default_version": false,
+      "status": "needs_conversion",
+      "reason": "historical 10-beta character; current 30-beta composition contract not yet verified",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    },
+    "M02_v1": {
+      "version": "M02_v1",
+      "manifest": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_four_characters_20260929/characters/cycling_M02_v1/manifest.json",
+      "family": "cycling_M02",
+      "default_version": false,
+      "status": "needs_conversion",
+      "reason": "historical 10-beta character; current 30-beta composition contract not yet verified",
+      "license": "Meshcapade CC BY-NC 4.0, version 20220207"
+    }
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "schema": "human_components_v1",
+  "items": {
+    "F01_groom": {
+      "version": "groom_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F01_v2/reference/groom_v1",
+      "reference_body": "F01",
+      "status": "ready",
+      "kind": "static_groom",
+      "license": "see character manifest"
+    },
+    "F02_groom": {
+      "version": "groom_v5",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_F02_v2/reference/groom_v5",
+      "reference_body": "F02",
+      "status": "ready",
+      "kind": "static_groom",
+      "license": "see character manifest"
+    },
+    "F03_groom": {
+      "version": "groom_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F03_v1/reference/groom_v1",
+      "reference_body": "F03",
+      "status": "ready",
+      "kind": "static_groom",
+      "license": "see character manifest"
+    },
+    "F04_v1_groom": {
+      "version": "groom_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F04_v1/reference/groom_v1",
+      "reference_body": "F04_v1",
+      "status": "ready",
+      "kind": "static_groom",
+      "license": "see character manifest"
+    },
+    "F05_v1_groom": {
+      "version": "groom_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_F05_v1/reference/groom_v1",
+      "reference_body": "F05_v1",
+      "status": "ready",
+      "kind": "static_groom",
+      "license": "see character manifest"
+    },
+    "M01_groom": {
+      "version": "groom_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M01_v2/reference/groom_v1",
+      "reference_body": "M01",
+      "status": "ready",
+      "kind": "static_groom",
+      "license": "see character manifest"
+    },
+    "M02_groom": {
+      "version": "groom_v5",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_M02_v2/reference/groom_v5",
+      "reference_body": "M02",
+      "status": "ready",
+      "kind": "static_groom",
+      "license": "see character manifest"
+    },
+    "M03_groom": {
+      "version": "groom_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M03_v1/reference/groom_v1",
+      "reference_body": "M03",
+      "status": "ready",
+      "kind": "static_groom",
+      "license": "see character manifest"
+    },
+    "M04_groom": {
+      "version": "groom_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M04_v1/reference/groom_v2",
+      "reference_body": "M04",
+      "status": "ready",
+      "kind": "static_groom",
+      "license": "see character manifest"
+    },
+    "M05_groom": {
+      "version": "groom_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_ten_adults_candidates_20260930/characters/cycling_M05_v1/reference/groom_v2",
+      "reference_body": "M05",
+      "status": "ready",
+      "kind": "static_groom",
+      "license": "see character manifest"
+    },
+    "M02_groom_v1": {
+      "version": "groom_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_M02_v2/reference/groom_v1",
+      "reference_body": "M02_v2",
+      "status": "needs_conversion",
+      "kind": "static_groom",
+      "license": "see source character manifest",
+      "reason": "missing current groom transfer files: active_curve_mask.npy, collision_correction.npy"
+    },
+    "M02_groom_v2": {
+      "version": "groom_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_M02_v2/reference/groom_v2",
+      "reference_body": "M02_v2",
+      "status": "needs_conversion",
+      "kind": "static_groom",
+      "license": "see source character manifest",
+      "reason": "missing current groom transfer files: active_curve_mask.npy, collision_correction.npy"
+    },
+    "M02_groom_v3": {
+      "version": "groom_v3",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_M02_v2/reference/groom_v3",
+      "reference_body": "M02_v2",
+      "status": "needs_conversion",
+      "kind": "static_groom",
+      "license": "see source character manifest",
+      "reason": "missing current groom transfer files: active_curve_mask.npy"
+    },
+    "M02_groom_v4": {
+      "version": "groom_v4",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_M02_v2/reference/groom_v4",
+      "reference_body": "M02_v2",
+      "status": "needs_conversion",
+      "kind": "static_groom",
+      "license": "see source character manifest",
+      "reason": "missing current groom transfer files: active_curve_mask.npy"
+    },
+    "F02_groom_v1": {
+      "version": "groom_v1",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_F02_v2/reference/groom_v1",
+      "reference_body": "F02_v2",
+      "status": "needs_conversion",
+      "kind": "static_groom",
+      "license": "see source character manifest",
+      "reason": "missing current groom transfer files: active_curve_mask.npy, collision_correction.npy"
+    },
+    "F02_groom_v2": {
+      "version": "groom_v2",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_F02_v2/reference/groom_v2",
+      "reference_body": "F02_v2",
+      "status": "needs_conversion",
+      "kind": "static_groom",
+      "license": "see source character manifest",
+      "reason": "missing current groom transfer files: active_curve_mask.npy, collision_correction.npy"
+    },
+    "F02_groom_v3": {
+      "version": "groom_v3",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_F02_v2/reference/groom_v3",
+      "reference_body": "F02_v2",
+      "status": "needs_conversion",
+      "kind": "static_groom",
+      "license": "see source character manifest",
+      "reason": "missing current groom transfer files: active_curve_mask.npy"
+    },
+    "F02_groom_v4": {
+      "version": "groom_v4",
+      "reference": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/outputs/experiments/cycling_commuter_pilot_20260930/characters/cycling_F02_v2/reference/groom_v4",
+      "reference_body": "F02_v2",
+      "status": "needs_conversion",
+      "kind": "static_groom",
+      "license": "see source character manifest",
+      "reason": "missing current groom transfer files: active_curve_mask.npy"
+    }
+  }
+}

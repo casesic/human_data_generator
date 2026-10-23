@@ -101,9 +101,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._reply(default_scene(query.get('environment',['city'])[0]))
             if parsed.path=='/api/map':
                 return self._reply(map_data(query.get('environment',['city'])[0]))
-            if parsed.path=='/api/assets':
-                from human_data_generator.config import resources
-                return self._reply(list(resources()['assets']))
+            if parsed.path=='/api/components':
+                from human_data_generator.components import describe
+                return self._reply(describe())
             if parsed.path=='/api/task':
                 task=TASKS.get(query.get('id',[''])[0])
                 if task is None:raise ValueError('unknown_task')
