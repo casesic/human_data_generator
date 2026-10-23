@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "human-data-generator"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Independent synthetic human ROI and MAMMA label generator"
+
+[tool.setuptools.packages.find]
+where = ["src"]

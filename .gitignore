@@ -1,0 +1,36 @@
+# Generated datasets, previews, acceptance outputs and runtime logs.
+/outputs/
+/output/
+/logs/
+/var/
+
+# Local source assets and model weights.
+/assets/
+/data/
+/checkpoints/
+*.blend
+*.blend1
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Python environments, build products and caches.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Local credentials and editor state.
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.DS_Store

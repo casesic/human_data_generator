@@ -1,0 +1,12 @@
+{
+  "hide_objects": [],
+  "schema": "human_environment_v1",
+  "blend_path": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/assets/scenes/riverfront/riverfront.blend",
+  "road_object_names": [
+    "Promenade_ground"
+  ],
+  "road_object_prefixes": [
+    "Promenade_limestone_"
+  ],
+  "road_z_tolerance_m": 0.03
+}

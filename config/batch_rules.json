@@ -1,0 +1,10 @@
+{
+  "schema": "human_batch_v1",
+  "seed": 20261023,
+  "scenes": [
+    "city_single_walk",
+    "city_single_ride",
+    "city_crossing_pair",
+    "riverfront_single_ride"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schema": "human_scene_v1",
+  "scene_id": "city_example",
+  "environment": "city",
+  "seed": 20261023,
+  "fps": 8,
+  "frame_count": 16,
+  "people": [
+    {
+      "person_id": 1,
+      "asset": "city_motion_1",
+      "motion_start": 0,
+      "route_xy_m": [[0, 77.96], [0, 92]],
+      "speed_m_s": 1.2,
+      "start_progress_m": 0
+    }
+  ],
+  "rigs": [
+    {
+      "rig_id": "rig_side",
+      "origin_m": [6.035128805859624, 75.97759765371869, 0],
+      "yaw_deg": 298
+    }
+  ]
+}
