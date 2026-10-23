@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import sys
+import uuid
 
 import numpy as np
 from PIL import Image
@@ -14,6 +15,7 @@ from human_data_generator.data.mamma_labels import ordered_vertex_ids
 from human_data_generator.data.scene_geometry import person_geometry, transform
 from human_data_generator.imaging.roi_planning import plan_person_crop_union
 from human_data_generator.runtime.scene import read_scene,compile_scene
+from human_data_generator.runtime.task_paths import RUN_SCHEMA
 
 
 def write(path,value):
@@ -46,7 +48,7 @@ def prepare(output, *, scene_path, frame_indices=None, selected_rig_ids=None,
     ordered_vertex_ids(template)
     recipe=dict(schema='human_run_v1',scene_episode_id=scene['scene_id'],episode_id=scene['scene_id'],
                 frame_count=scene['frame_count'],fps=scene['fps'],people=people,person_timelines=timelines,
-                scene=environment['scene_config'],scene_matrices_ref=str(output/'scene_matrices.npy'),
+                scene=environment['scene_config'],
                 geometry_acceptance='passed',road_height_m=0,
                 render=dict(source_resolution=[5760,2880],samples=64,seed=scene['seed']))
     bodies=person_geometry(recipe,frames)
@@ -70,7 +72,6 @@ def prepare(output, *, scene_path, frame_indices=None, selected_rig_ids=None,
     write(output/'scene.json',scene)
     write(output/'recipe.json',recipe)
     np.save(output/'scene_matrices.npy',matrices)
-    rig_rows=[]
     for rig in selected:
         rid=rig['rig_id']
         child=output/'rigs'/rid
@@ -85,9 +86,6 @@ def prepare(output, *, scene_path, frame_indices=None, selected_rig_ids=None,
                       origin_m=rig['origin_m'],yaw_deg=rig['yaw_deg'],baseline_m=.18,
                       cameras=cameras,valid_masks={c:str(path) for c,path in masks.items()})
         write(child/'rig.json',rig_json)
-        (child/'camera_configs').mkdir()
-        for camera in cameras:
-            write(child/'camera_configs'/f"{camera['id']}.json",dict(cameras=[camera]))
         valid={c:np.asarray(Image.open(path).convert('L'))>0 for c,path in masks.items()}
         planned={}
         for frame in frames:
@@ -109,11 +107,8 @@ def prepare(output, *, scene_path, frame_indices=None, selected_rig_ids=None,
                 frame_plans[cid]=region
             planned[frame]=frame_plans
         write(child/'planned_regions.json',planned)
-        rig_rows.append(dict(rig_id=rid,root=str(child)))
-    write(output/'multirig.json',dict(schema='human_multirig_v1',rigs=rig_rows))
-    write(output/'job.json',dict(recipe=str(output/'recipe.json'),rig=str(output/'rigs'/selected[0]['rig_id']/'rig.json'),
-                                 frames=frames))
-    config=dict(schema='human_run_config_v1',selected_frames=frames,preview_only=preview,
+    config=dict(schema=RUN_SCHEMA,task_id=uuid.uuid4().hex,selected_frames=frames,
+                rig_ids=[r['rig_id'] for r in selected],preview_only=preview,
                 consumer_python=sys.executable,consumer_mode='persistent',
                 storage_mode='roi_only',generation_contract='preview_rgb_v1' if preview else 'mamma_512_v1',
                 max_camera_calls=len(frames)*2*len(selected),full_image_size_wh=[5760,2880],

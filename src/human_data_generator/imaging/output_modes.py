@@ -4,13 +4,15 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import platform
+import re
 import shutil
-import subprocess
 import uuid
 
 import cv2
 import numpy as np
 import PIL
+
+from human_data_generator.runtime.task_paths import task_ref
 
 def validate_output_mode(value):
     if value not in ('compact','full'):raise ValueError('invalid_output_mode')
@@ -29,14 +31,26 @@ def _utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def prepare_source_workspace(output, output_mode, temporary_root=None):
+def _owned_frame(task_root, output, task_id):
+    task_root, output = Path(task_root).resolve(), Path(output).resolve()
+    ref = task_ref(task_root, output)
+    parts = Path(ref).parts
+    if (len(parts) != 3 or parts[0] != 'rigs' or
+            re.fullmatch(r'rig_[a-z0-9_]+', parts[1]) is None or
+            re.fullmatch(r'frame_[0-9]{3,}', parts[2]) is None or
+            re.fullmatch(r'[0-9a-f]{32}', str(task_id)) is None):
+        raise ValueError('invalid_owned_frame_workspace')
+    return output, ref
+
+
+def prepare_source_workspace(output, output_mode, *, task_root, task_id):
     """Create a source directory and, for compact mode, an ownership marker.
 
     Existing directories are always rejected.  The marker binds cleanup to the
     exact output directory and a single generated token.
     """
     mode = validate_output_mode(output_mode)
-    output = Path(output).resolve()
+    output, output_ref = _owned_frame(task_root, output, task_id)
     if mode == "full":
         source = output / "source"
         source.mkdir(parents=True, exist_ok=False)
@@ -49,18 +63,15 @@ def prepare_source_workspace(output, output_mode, temporary_root=None):
             source_dir=str(source),
         )
         return source
-    temporary = (
-        output / "_temporary_ds_source"
-        if temporary_root is None
-        else Path(temporary_root).resolve()
-    )
+    temporary = output / "_temporary_ds_source"
     temporary.mkdir(parents=True, exist_ok=False)
     source = temporary / "source"
     source.mkdir()
     marker = dict(
         owner="human_data_generator.ds_output_modes",
-        output=str(output),
-        temporary_root=str(temporary),
+        task_id=task_id,
+        output_ref=output_ref,
+        temporary_ref=output_ref+'/_temporary_ds_source',
         token=uuid.uuid4().hex,
         created_utc=_utc_now(),
     )
@@ -130,25 +141,28 @@ def preserve_source_recipe(
     return value
 
 
-def cleanup_owned_source(output, source_dir):
+def cleanup_owned_source(output, source_dir, *, task_root, task_id):
     """Remove only a compact workspace carrying its exact ownership marker."""
-    output, source_dir = Path(output).resolve(), Path(source_dir).resolve()
-    temporary = source_dir.parent
+    output, output_ref = _owned_frame(task_root, output, task_id)
+    source_dir = Path(source_dir).resolve()
+    temporary = output / '_temporary_ds_source'
     marker_path = temporary / MARKER
-    if source_dir.name != "source" or not marker_path.is_file():
+    if source_dir != temporary / 'source' or not marker_path.is_file():
         raise RuntimeError(f"Refusing to clean unowned source directory: {source_dir}")
     marker = json.loads(marker_path.read_text())
     if (
         marker.get("owner") != "human_data_generator.ds_output_modes"
-        or Path(marker.get("output", "")).resolve() != output
-        or Path(marker.get("temporary_root", "")).resolve() != temporary
+        or marker.get('task_id') != task_id
+        or marker.get('output_ref') != output_ref
+        or marker.get('temporary_ref') != output_ref+'/_temporary_ds_source'
+        or not isinstance(marker.get('token'),str) or len(marker['token']) != 32
     ):
         raise RuntimeError(f"Temporary source ownership mismatch: {temporary}")
     shutil.rmtree(temporary)
     return temporary
 
 
-def complete_output(output, output_mode, source_dir, *, checks=None):
+def complete_output(output, output_mode, source_dir, *, task_root, task_id, checks=None):
     """Record successful validation, then clean compact-owned source buffers."""
     mode = validate_output_mode(output_mode)
     output, source_dir = Path(output).resolve(), Path(source_dir).resolve()
@@ -162,7 +176,7 @@ def complete_output(output, output_mode, source_dir, *, checks=None):
     )
     if mode == "compact":
         try:
-            cleaned = cleanup_owned_source(output, source_dir)
+            cleaned = cleanup_owned_source(output, source_dir,task_root=task_root,task_id=task_id)
         except Exception as error:
             temporary = source_dir.parent
             record_status(

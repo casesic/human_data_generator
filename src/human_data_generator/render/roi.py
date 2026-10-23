@@ -1,17 +1,8 @@
 """Render one paired ERP ROI rig from the shared in-memory scene."""
-import argparse
 import json
-import os
-from pathlib import Path
-import subprocess
-import sys
 import time
-import resource
 import bpy
 import numpy as np
-from human_data_generator.config import PROJECT_ROOT
-ROOT=PROJECT_ROOT
-from human_data_generator.render import assembly
 def scene_settings(s):
     return dict(view_transform=s.view_settings.view_transform,look=s.view_settings.look,exposure=s.view_settings.exposure,gamma=s.view_settings.gamma,
         display_device=s.display_settings.display_device,view_use_curve_mapping=s.view_settings.use_curve_mapping,
@@ -23,13 +14,12 @@ def scene_settings(s):
 from human_data_generator.rendering.blender.assembly import render_cameras
 from human_data_generator.camera.erp import project_erp
 from human_data_generator.imaging.roi_planning import plan_person_crop_union,border_coordinates
-from human_data_generator.runtime.frame_consumer import FrameConsumer
 
 
 def write(p,v):p.write_text(json.dumps(v,indent=2,allow_nan=False)+'\n')
 
 
-def render_rig_roi(scene,cam,node,folder,rig_root,recipe,cameras,world_parts,part_owners,config,
+def render_rig_roi(scene,cam,node,folder,task_root,recipe,cameras,world_parts,part_owners,config,
                    frame,call_started):
     """Render one rig from the *already updated* scene geometry."""
     begin=time.monotonic();ids={p['person_id'] for p in recipe['people']};plans={}
@@ -56,9 +46,8 @@ def render_rig_roi(scene,cam,node,folder,rig_root,recipe,cameras,world_parts,par
             if hasattr(node,'directory'):node.directory=str(dest)
             else:node.base_path=str(dest)
             call=call_started(frame,camera['id'],kind,roi,[w,h],samples)
-            t=time.monotonic();record=render_cameras(scene,cam,node,rig_root/'camera_configs'/f'{camera["id"]}.json',dest)[0]
+            t=time.monotonic();record=render_cameras(scene,cam,node,camera,dest,task_root)[0]
             dt=time.monotonic()-t;record.update(kind=kind,full_grid=[w,h],samples=samples,roi_xyxy=roi,seconds=dt)
             records.append(record)
             call_started(frame,camera['id'],kind,roi,[w,h],samples,completed_call=call,seconds=dt)
     return dict(frame_index=frame,rig_id=recipe.get('rig_id'),roi_planning_seconds=plan_seconds,records=records)
-

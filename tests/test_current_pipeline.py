@@ -1,5 +1,11 @@
 """Bounded CPU checks for the single current generation/data path."""
 import json
+import importlib
+import os
+import shutil
+import sys
+import time
+from types import ModuleType, SimpleNamespace
 from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
@@ -25,6 +31,8 @@ from human_data_generator import run
 from human_data_generator.runtime.multirig_prepare import prepare
 from human_data_generator.runtime.scene import compile_scene,validate_scene
 from human_data_generator.runtime.scene import _curve
+from human_data_generator.runtime.task_paths import run_config, task_path
+from human_data_generator.imaging.output_modes import prepare_source_workspace, cleanup_owned_source, record_failure
 
 
 def put(path,value):
@@ -34,11 +42,14 @@ def put(path,value):
 
 def synthetic_bundle(root):
     root=Path(root)
+    put(root/'scene.json',dict(schema='human_scene_v2'))
     people=[dict(person_id=7,asset_id='fixture_asset',source_manifest_id='fixture_source'),
             dict(person_id=9,asset_id='fixture_asset',source_manifest_id='fixture_source')]
     put(root/'recipe.json',dict(schema='human_run_v1',scene_episode_id='fixture_episode',
         frame_count=1,fps=8,people=people))
-    put(root/'run_config.json',dict(selected_frames=[0],full_image_size_wh=[256,256],
+    np.save(root/'scene_matrices.npy',np.broadcast_to(np.eye(4),(1,2,4,4)))
+    put(root/'run_config.json',dict(schema='human_run_config_v2',task_id='a'*32,
+        rig_ids=['rig_alpha','rig_beta'],selected_frames=[0],full_image_size_wh=[256,256],
         generation_contract='mamma_512_v1',
         mamma_512_label=dict(template_id='MAMMA_verts_512_ordered_v1')))
     valid=np.ones((256,256),bool)
@@ -54,7 +65,6 @@ def synthetic_bundle(root):
                   world=np.tile(np.array([[[0.,0.,2.]]]),(2,512,1)),
                   full_body=[triangle,triangle],faces=[np.array([[0,1,2]],np.int32)]*2,
                   vertex_ids=np.arange(512,dtype=np.int32))
-    rigs=[]
     for rid,second_visible in [('rig_alpha',True),('rig_beta',False)]:
         child=root/'rigs'/rid
         child.mkdir(parents=True)
@@ -62,7 +72,10 @@ def synthetic_bundle(root):
         Image.fromarray(valid.astype(np.uint8)*255).save(mask)
         put(child/'rig.json',dict(rig_id=rid,cameras=[dict(id='cam2'),dict(id='cam4')],
                                   valid_masks={'cam2':str(mask),'cam4':str(mask)}))
+        put(child/'planned_regions.json',{'0':{'cam2':{},'cam4':{}}})
         put(child/'label_policy.json',dict(visibility_policy='fixture'))
+    for rid,second_visible in [('rig_alpha',True),('rig_beta',False)]:
+        child=root/'rigs'/rid
         instance=np.zeros((256,256),np.float32)
         instance[80:170,80:170]=7
         if second_visible:instance[80:170,175:235]=9
@@ -70,8 +83,6 @@ def synthetic_bundle(root):
         for camera in ('cam2','cam4'):
             consume_camera_arrays(child,0,camera,rgb,rng,instance,[0,0,256,256],
                                   pose,valid,geometry)
-        rigs.append(dict(rig_id=rid,root=str(child)))
-    put(root/'multirig.json',dict(schema='human_multirig_v1',rigs=rigs))
     manifest=export_existing(root)
     put(root/'observations.json',manifest)
     return manifest
@@ -127,6 +138,8 @@ class CurrentPipelineTest(unittest.TestCase):
             output=Path(temp)/'prepared'
             config=prepare(output,scene_path=source)
             self.assertEqual(config['max_camera_calls'],8)
+            self.assertEqual(config['rig_ids'],['rig_side','rig_other'])
+            self.assertEqual(len([p for p in output.rglob('*') if p.is_file()]),8)
             self.assertTrue((output/'scene_matrices.npy').is_file())
             self.assertFalse((output/'rigs/rig_other/scene_matrices.npy').exists())
             matrix=np.load(output/'scene_matrices.npy')[:,0]
@@ -322,7 +335,10 @@ class CurrentPipelineTest(unittest.TestCase):
             asset=json.loads(Path(person['asset_manifest']).read_text())
             self.assertEqual(np.load(asset['body_vertices'],mmap_mode='r').shape[0],1)
             self.assertNotIn('deadline_monotonic',config)
-            self.assertEqual(json.loads((output/'job.json').read_text())['frames'],[5])
+            self.assertEqual(config['rig_ids'],['rig_side'])
+            self.assertEqual(sorted(str(p.relative_to(output)) for p in output.rglob('*') if p.is_file()),
+                ['recipe.json','rigs/rig_side/planned_regions.json','rigs/rig_side/rig.json',
+                 'run_config.json','scene.json','scene_matrices.npy'])
             self.assertFalse((output/'frame_005').exists())
             with patch('human_data_generator.run._resources',return_value={}),\
                  patch('human_data_generator.run.subprocess.Popen',side_effect=RuntimeError('mock_launch')) as popen:
@@ -332,7 +348,8 @@ class CurrentPipelineTest(unittest.TestCase):
             self.assertEqual(command[command.index('--python')+1],
                 str(PROJECT_ROOT/'src/human_data_generator/render/multirig.py'))
             self.assertEqual(json.loads((output/'run_config.json').read_text())['gpu_uuid'],'MOCK_GPU')
-            self.assertNotIn('remaining_budget_seconds',json.loads((output/'job.json').read_text()))
+            self.assertEqual(json.loads((output/'run_config.json').read_text())['budget_seconds'],60)
+            self.assertNotIn('remaining_budget_seconds',json.loads((output/'run_config.json').read_text()))
 
     def test_render_command_prepares_before_start(self):
         events=[]
@@ -345,6 +362,242 @@ class CurrentPipelineTest(unittest.TestCase):
             run.main(['render','--scene','config/scene_example.json','--name','mock_current',
                       '--gpu-uuid','MOCK','--budget-seconds','70'])
         self.assertEqual(events,[('prepare','mock_current'),('start',70)])
+
+    def test_relocated_prepared_task_and_current_layout(self):
+        scene=PROJECT_ROOT/'config/scene_example.json'
+        with tempfile.TemporaryDirectory(prefix='hdg_relocate_') as temp:
+            old=Path(temp)/'old';new=Path(temp)/'relocated'
+            prepare(old,scene_path=scene,frame_indices=[1,5],selected_rig_ids=['rig_side'])
+            original=run_config(old)
+            shutil.move(str(old),str(new))
+            self.assertFalse(old.exists())
+            elsewhere=Path(temp)/'elsewhere';elsewhere.mkdir()
+            cwd=Path.cwd()
+            try:
+                os.chdir(elsewhere)
+                self.assertEqual(run_config(new)['selected_frames'],[1,5])
+                self.assertEqual(run_config(new)['rig_ids'],['rig_side'])
+                self.assertEqual(json.loads(task_path(new,'recipe.json').read_text())['people'][0]['person_id'],1)
+                self.assertIn('1',json.loads(task_path(new,'rigs/rig_side/planned_regions.json').read_text()))
+                obsolete_camera=new/'rigs/rig_side/camera_configs';obsolete_camera.mkdir()
+                with self.assertRaisesRegex(ValueError,'obsolete_prepared_layout'):
+                    run_config(new)
+                obsolete_camera.rmdir()
+                with_old_field=dict(run_config(new),reprocess_units_before_render=[])
+                put(new/'run_config.json',with_old_field)
+                with self.assertRaisesRegex(ValueError,'obsolete_run_config_fields'):
+                    run_config(new)
+                put(new/'run_config.json',original)
+                with patch('human_data_generator.run._resources',return_value={}),\
+                     patch('human_data_generator.run.subprocess.Popen',side_effect=RuntimeError('launch_boundary')) as popen:
+                    with self.assertRaisesRegex(RuntimeError,'launch_boundary'):
+                        render_prepared(new,'MOCK_GPU',47)
+                self.assertEqual(popen.call_args.args[0][-1],str(new))
+                started=run_config(new)
+                self.assertEqual(started['task_id'],original['task_id'])
+                self.assertEqual(started['gpu_uuid'],'MOCK_GPU')
+                self.assertEqual(started['budget_seconds'],47)
+                self.assertGreater(started['deadline_monotonic'],0)
+            finally:os.chdir(cwd)
+            with self.assertRaisesRegex(ValueError,'current_prepared_layout_required'):
+                run.main(['run-prepared','--root',str(old),'--gpu-uuid','MOCK'])
+            obsolete=Path(temp)/'obsolete';obsolete.mkdir()
+            put(obsolete/'run_config.json',dict(schema='human_run_config_v1',selected_frames=[0]))
+            with self.assertRaisesRegex(ValueError,'current_prepared_layout_required'):
+                run_config(obsolete)
+
+    def test_owned_buffer_cleanup_rejections(self):
+        with tempfile.TemporaryDirectory(prefix='hdg_owned_') as temp:
+            root=Path(temp)/'task';other=Path(temp)/'other';outside=Path(temp)/'external'
+            task_id='a'*32
+            output=root/'rigs/rig_side/frame_005'
+            source=prepare_source_workspace(output,'compact',task_root=root,task_id=task_id)
+            (source/'evidence.txt').write_text('retained on failure')
+            record_failure(output,'compact',source,'consume',RuntimeError('fixture'))
+            self.assertTrue((source/'evidence.txt').is_file())
+            for changed in (outside,other/'rigs/rig_side/frame_005'):
+                with self.assertRaises(ValueError):
+                    cleanup_owned_source(changed,source,task_root=root,task_id=task_id)
+            with self.assertRaises(RuntimeError):
+                cleanup_owned_source(output,source,task_root=root,task_id='b'*32)
+            marker=output/'_temporary_ds_source/.human_data_temporary_source.json'
+            saved=marker.read_text();marker.write_text(saved.replace(task_id,'c'*32))
+            with self.assertRaisesRegex(RuntimeError,'ownership mismatch'):
+                cleanup_owned_source(output,source,task_root=root,task_id=task_id)
+            self.assertTrue((source/'evidence.txt').is_file())
+            marker.write_text(saved)
+            cleanup_owned_source(output,source,task_root=root,task_id=task_id)
+            self.assertFalse(source.exists())
+
+    def test_camera_object_and_multirig_callbacks_without_blender(self):
+        fake_bpy=ModuleType('bpy')
+        fake_mathutils=ModuleType('mathutils')
+        fake_mathutils.Matrix=lambda value:np.asarray(value)
+        fake_mathutils.Vector=lambda value:np.asarray(value)
+        with patch.dict(sys.modules,{'bpy':fake_bpy,'mathutils':fake_mathutils}):
+            camera_module=importlib.import_module('human_data_generator.rendering.blender.assembly')
+            multi=importlib.import_module('human_data_generator.render.multirig')
+            roi_module=importlib.import_module('human_data_generator.render.roi')
+        with tempfile.TemporaryDirectory(prefix='hdg_callbacks_') as temp:
+            root=Path(temp)
+            image=np.eye(4).tolist()
+            camera=dict(id='cam2',camera_to_world=image)
+            render_calls=[]
+            def fake_render(*,write_still):
+                render_calls.append(write_still)
+                (root/'cam2_0001.exr').write_bytes(b'fixture')
+            fake_bpy.ops=SimpleNamespace(render=SimpleNamespace(render=fake_render))
+            fake_scene=SimpleNamespace(render=SimpleNamespace(filepath=''))
+            cam=SimpleNamespace(matrix_world=None)
+            node=SimpleNamespace(file_name='')
+            record=camera_module.render_cameras(fake_scene,cam,node,camera,root,root)
+            self.assertEqual(record[0]['source'],'cam2.exr')
+            self.assertEqual(record[0]['camera_to_world'],image)
+            self.assertEqual(render_calls,[True])
+
+            seen_cameras=[]
+            source=root/'roi_fixture';source.mkdir()
+            scene=SimpleNamespace(render=SimpleNamespace(),cycles=SimpleNamespace())
+            def capture_camera(scene,cam,node,camera,dest,task_root):
+                seen_cameras.append((camera['id'],task_root))
+                return [dict(id=camera['id'],source='fixture.exr')]
+            with patch.object(roi_module,'render_cameras',side_effect=capture_camera),\
+                 patch.object(roi_module,'project_erp',return_value=(np.array([[1.,1.]]),None)),\
+                 patch.object(roi_module,'plan_person_crop_union',return_value=dict(roi_xyxy=[0,0,4,4])),\
+                 patch.object(roi_module,'border_coordinates',return_value=(0.,1.,0.,1.)):
+                result=roi_module.render_rig_roi(scene,None,SimpleNamespace(directory=''),source,root,
+                    dict(rig_id='rig_alpha',people=[dict(person_id=7)]),
+                    [dict(id=cid,camera_to_world=image) for cid in ('cam2','cam4')],
+                    {'body':np.array([[0.,0.,1.]])},{'body':7},dict(storage_mode='roi_only'),1,
+                    lambda *args,**kwargs:1)
+            self.assertEqual(seen_cameras,[('cam2',root),('cam4',root)])
+            self.assertEqual([row['id'] for row in result['records']],['cam2','cam4'])
+
+            put(root/'scene.json',dict(schema='human_scene_v2'))
+            put(root/'recipe.json',dict(schema='human_run_v1',scene_episode_id='fixture',
+                people=[dict(person_id=7),dict(person_id=9)]))
+            np.save(root/'scene_matrices.npy',np.broadcast_to(np.eye(4),(2,2,4,4)))
+            put(root/'run_config.json',dict(schema='human_run_config_v2',task_id='d'*32,
+                rig_ids=['rig_alpha','rig_beta'],selected_frames=[1,3],
+                scene_settings={},deadline_monotonic=time.monotonic()+60,
+                consumer_python=sys.executable,max_camera_calls=8))
+            for rid in ('rig_alpha','rig_beta'):
+                put(root/f'rigs/{rid}/rig.json',dict(rig_id=rid,
+                    cameras=[dict(id=cid,camera_to_world=image) for cid in ('cam2','cam4')]))
+                put(root/f'rigs/{rid}/planned_regions.json',
+                    {str(frame):{cid:dict(roi_xyxy=[0,0,4,4]) for cid in ('cam2','cam4')}
+                     for frame in (1,3)})
+            calls=[]
+            class Worker:
+                def __init__(self,*args,**kwargs):
+                    self.process=SimpleNamespace(pid=1234);self.startup_seconds=0
+                    self.responses=[]
+                def consume(self,frame,rig_id):
+                    self.responses.append(dict(frame=frame,rig_id=rig_id))
+                    return dict(status='ok',frame=frame,rig_id=rig_id)
+                def close(self):return dict(status='closed')
+                def abort(self):raise AssertionError('worker aborted')
+            def fake_roi(scene,cam,node,folder,task_root,recipe,cameras,parts,owners,config,frame,started):
+                calls.append((frame,recipe['rig_id'],[c['id'] for c in cameras],task_root))
+                put(folder/'roi_plan.json',dict(cameras={c['id']:dict(roi_xyxy=[0,0,4,4]) for c in cameras}))
+                return dict(records=[dict(id=c['id'],source=f'rigs/{recipe["rig_id"]}/frame_{frame:03d}/source.exr')
+                                     for c in cameras])
+            def fake_assembly(*,root,render_cameras_fn,frame_complete_fn,frame_source_dir_fn,reuse_session):
+                scene=SimpleNamespace(objects=[],render=SimpleNamespace(use_persistent_data=True))
+                for frame in (1,3):
+                    folder=frame_source_dir_fn(frame)
+                    result=render_cameras_fn(scene,None,None,folder,frame_index=frame)
+                    frame_complete_fn(frame,folder,dict(sources=result,frame_index=frame))
+                put(root/'assembly_result.json',dict(scene_reused=False))
+            with patch.object(multi,'FrameConsumer',Worker),\
+                 patch.object(multi,'render_rig_roi',side_effect=fake_roi),\
+                 patch.object(multi,'scene_settings',return_value={}),\
+                 patch.object(multi.assembly,'main',side_effect=fake_assembly):
+                multi.main(root)
+            self.assertEqual([(frame,rid,cids) for frame,rid,cids,_ in calls],
+                [(frame,rid,['cam2','cam4']) for frame in (1,3) for rid in ('rig_alpha','rig_beta')])
+            self.assertTrue(all(path==root for *_,path in calls))
+            self.assertFalse((root/'frame_001').exists())
+            self.assertEqual(json.loads((root/'multirig_render_result.json').read_text())['normal_path_geometry_updates'],2)
+            for rid in ('rig_alpha','rig_beta'):
+                self.assertTrue((root/f'rigs/{rid}/frame_001/_temporary_ds_source/source/source_manifest.json').is_file())
+
+    def test_assembly_updates_shared_geometry_once_per_frame(self):
+        fake_bpy=ModuleType('bpy');fake_mathutils=ModuleType('mathutils')
+        fake_mathutils.Matrix=lambda value:np.asarray(value)
+        fake_mathutils.Vector=lambda value:np.asarray(value)
+        with patch.dict(sys.modules,{'bpy':fake_bpy,'mathutils':fake_mathutils}):
+            assembly=importlib.import_module('human_data_generator.render.assembly')
+        class Vertices:
+            def __init__(self,points):self.points=np.asarray(points,np.float32).copy()
+            def foreach_set(self,attribute,values):self.points=np.asarray(values,np.float32).reshape(-1,3).copy()
+            def foreach_get(self,attribute,target):target[:]=self.points.ravel()
+        def mesh_object(points):
+            return SimpleNamespace(data=SimpleNamespace(vertices=Vertices(points),update=lambda:None),
+                matrix_world=np.eye(4),hide_get=lambda:False,hide_set=lambda value:None)
+        with tempfile.TemporaryDirectory(prefix='hdg_assembly_') as temp:
+            root=Path(temp);blend=root/'scene.blend';blend.write_bytes(b'fixture')
+            environment=root/'environment.json'
+            put(environment,dict(schema='human_environment_v1',blend_path=str(blend),hide_objects=[]))
+            vertices=np.array([[[0,0,1],[.1,0,1],[0,.1,1]],
+                               [[0,0,1.1],[.1,0,1.1],[0,.1,1.1]]],np.float32)
+            body_path=root/'body.npy';np.save(body_path,vertices)
+            asset_path=root/'asset.json';put(asset_path,dict(body_vertices=str(body_path)))
+            person=dict(person_id=7,asset_manifest=str(asset_path),root_mode='fixture')
+            matrices=np.broadcast_to(np.eye(4),(2,1,4,4)).copy()
+            matrices[1,0,0,3]=.2
+            put(root/'scene.json',dict(schema='human_scene_v2'))
+            put(root/'recipe.json',dict(schema='human_run_v1',scene=str(environment),
+                scene_episode_id='fixture',frame_count=2,fps=8,geometry_acceptance='passed',
+                people=[person],person_timelines={'7':[dict(asset_frame=k,source_frame=k) for k in (0,1)]},
+                render=dict(source_resolution=[4,4],samples=1,seed=2)))
+            np.save(root/'scene_matrices.npy',matrices)
+            put(root/'run_config.json',dict(schema='human_run_config_v2',task_id='e'*32,
+                rig_ids=['rig_side'],selected_frames=[0,1],gpu_uuid='MOCK',
+                deadline_monotonic=time.monotonic()+60))
+            put(root/'rigs/rig_side/rig.json',dict(rig_id='rig_side',cameras=[]))
+            put(root/'rigs/rig_side/planned_regions.json',{})
+            body=mesh_object(vertices[0]);cloth=mesh_object(vertices[0])
+            road=SimpleNamespace(name='Road')
+            scene=SimpleNamespace(objects=[body,cloth],render=SimpleNamespace(),cycles=SimpleNamespace(max_bounces=2),
+                view_layers=[SimpleNamespace()],ray_cast=lambda *args,**kwargs:
+                    (True,SimpleNamespace(z=0),SimpleNamespace(z=1),0,road,None))
+            device=SimpleNamespace(name='mock',id='mock',type='CUDA',use=False)
+            preferences=SimpleNamespace(compute_device_type=None,get_devices=lambda:None,devices=[device])
+            fake_bpy.context=SimpleNamespace(scene=scene,view_layer=SimpleNamespace(update=lambda:None),
+                evaluated_depsgraph_get=lambda:None,
+                preferences=SimpleNamespace(addons={'cycles':SimpleNamespace(preferences=preferences)}))
+            fake_bpy.app=SimpleNamespace(version_string='mock')
+            key=(str(blend),blend.stat().st_size,blend.stat().st_mtime_ns,
+                ((7,str(asset_path),asset_path.stat().st_size,asset_path.stat().st_mtime_ns),),
+                (4,4),1,'MOCK')
+            prior=(person,{},vertices,vertices,np.broadcast_to(np.eye(4),(2,4,4)),matrices,
+                   body,cloth,[],[],[0,1])
+            assembly._SESSION=dict(key=key,scene=scene,objects=[prior],camera='mock-camera',
+                                   file_node=SimpleNamespace(directory=''))
+            seen=[]
+            def render_callback(scene,camera,node,folder,*,frame_index):
+                seen.append((frame_index,body.data.vertices.points.copy(),cloth.data.vertices.points.copy(),
+                             np.asarray(body.matrix_world).copy()))
+                return [dict(id='cam2',source='fixture')]
+            def complete(frame,folder,manifest):
+                self.assertEqual(manifest['frame_index'],frame)
+                self.assertEqual(manifest['episode_recipe'],'recipe.json')
+            def source_folder(frame):
+                folder=root/f'scratch_{frame}';folder.mkdir()
+                return folder
+            with patch.dict(os.environ,{'CUDA_VISIBLE_DEVICES':'MOCK'}),\
+                 patch.object(assembly,'configure_render'),\
+                 patch.object(assembly,'geometry_paths',return_value={'body_vertices':body_path}),\
+                 patch.object(assembly,'support_limits',return_value=(.9,1.2)):
+                assembly.main(root=root,render_cameras_fn=render_callback,
+                    frame_complete_fn=complete,frame_source_dir_fn=source_folder,reuse_session=True)
+            self.assertEqual([row[0] for row in seen],[0,1])
+            np.testing.assert_array_equal(seen[1][1],vertices[1])
+            np.testing.assert_array_equal(seen[1][2],vertices[1])
+            self.assertEqual(seen[1][3][0,3],.2)
+            self.assertEqual(json.loads((root/'assembly_result.json').read_text())['scene_reused'],True)
+            assembly._SESSION=None
 
     def test_consumer_export_and_rejections(self):
         with tempfile.TemporaryDirectory(prefix='hdg_current_bundle_') as temp:

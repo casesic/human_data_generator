@@ -8,6 +8,7 @@ import sys
 import time
 
 from human_data_generator.config import PROJECT_ROOT,resource_path
+from human_data_generator.runtime.task_paths import run_config, task_path
 
 
 def _write(path,value):
@@ -67,9 +68,9 @@ def render_prepared(output,gpu_uuid,budget_seconds,video=False):
     """Only this explicit call starts Blender and a persistent CPU consumer."""
     from human_data_generator.runtime.roi_run_utils import disk_snapshot
     output=Path(output).resolve()
-    config=json.loads((output/'run_config.json').read_text())
-    recipe=json.loads((output/'recipe.json').read_text())
-    if config['schema']!='human_run_config_v1' or recipe['schema']!='human_run_v1':
+    config=run_config(output)
+    recipe=json.loads(task_path(output,'recipe.json').read_text())
+    if recipe['schema']!='human_run_v1':
         raise ValueError('current_prepared_task_required')
     if any((output/name).exists() for name in ('started.json','render_calls.jsonl','failure.json','observations.json')):
         raise FileExistsError('task_already_started')
@@ -77,10 +78,10 @@ def render_prepared(output,gpu_uuid,budget_seconds,video=False):
         raise ValueError('positive_budget_required')
     evidence=_resources(output,gpu_uuid)
     start=time.monotonic();deadline=start+budget_seconds
-    config.update(gpu_uuid=gpu_uuid,deadline_monotonic=deadline)
+    config.update(gpu_uuid=gpu_uuid,budget_seconds=budget_seconds,deadline_monotonic=deadline)
     _write(output/'run_config.json',config)
     _write(output/'resources_before.json',evidence)
-    _write(output/'started.json',dict(gpu_uuid=gpu_uuid,budget_seconds=budget_seconds))
+    _write(output/'started.json',dict(start_monotonic=start))
     env=dict(os.environ,PYTHONPATH=str(PROJECT_ROOT/'src'),CUDA_VISIBLE_DEVICES=gpu_uuid,
              OMP_NUM_THREADS='4',OPENBLAS_NUM_THREADS='1',PYTHONDONTWRITEBYTECODE='1',
              MPLCONFIGDIR='/tmp/human-data-generator-mpl')
@@ -104,9 +105,8 @@ def render_prepared(output,gpu_uuid,budget_seconds,video=False):
     if config['preview_only']:
         _write(output/'preview_result.json',dict(status='completed',frames=config['selected_frames']))
         return output
-    spec=json.loads((output/'multirig.json').read_text())
-    for rig in spec['rigs']:
-        child=Path(rig['root'])
+    for rig_id in config['rig_ids']:
+        child=task_path(output,f'rigs/{rig_id}')
         with (child/'finish.log').open('w') as log:
             subprocess.run([sys.executable,'-m','human_data_generator.consumer','finish','--root',str(child)],
                            cwd=PROJECT_ROOT,env=dict(env,CUDA_VISIBLE_DEVICES=''),stdout=log,
@@ -118,8 +118,8 @@ def render_prepared(output,gpu_uuid,budget_seconds,video=False):
            observed=sum(r['status']=='observed' for r in manifest['observations']),
            wall_seconds=time.monotonic()-start,disk=disk_snapshot(output)))
     if video:
-        for rig in spec['rigs']:
-            child=Path(rig['root'])
+        for rig_id in config['rig_ids']:
+            child=task_path(output,f'rigs/{rig_id}')
             try:
                 subprocess.run([sys.executable,'-m','human_data_generator.consumer','video','--root',str(child)],
                                cwd=PROJECT_ROOT,env=dict(env,CUDA_VISIBLE_DEVICES=''),check=True,
@@ -144,11 +144,11 @@ def main(argv=None):
             p.add_argument('--budget-seconds',type=int,default=1800)
             p.add_argument('--video',action='store_true')
     p=sub.add_parser('run-prepared')
-    p.add_argument('--name',required=True);p.add_argument('--preview',action='store_true')
+    p.add_argument('--root',type=Path,required=True)
     p.add_argument('--gpu-uuid',required=True);p.add_argument('--budget-seconds',type=int,default=1800)
     p.add_argument('--video',action='store_true')
     p=sub.add_parser('export')
-    p.add_argument('--name',required=True)
+    p.add_argument('--root',type=Path,required=True)
     args=parser.parse_args(argv)
     if args.action=='plan':
         print(json.dumps(plan(args.scene,args.frame,args.rig,args.preview),indent=2))
@@ -159,10 +159,10 @@ def main(argv=None):
         output,_=prepare(args.scene,args.name,args.frame,args.rig,args.preview)
         render_prepared(output,args.gpu_uuid,args.budget_seconds,args.video)
     elif args.action=='run-prepared':
-        render_prepared(_task_path(args.name,args.preview),args.gpu_uuid,args.budget_seconds,args.video)
+        render_prepared(args.root,args.gpu_uuid,args.budget_seconds,args.video)
     else:
         from human_data_generator.data.mamma_export import export_existing
-        output=_task_path(args.name)
+        output=args.root.resolve()
         manifest=export_existing(output)
         destination=output/'observations.json'
         if destination.exists():raise FileExistsError(destination)

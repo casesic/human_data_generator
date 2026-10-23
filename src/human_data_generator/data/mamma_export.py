@@ -1,12 +1,12 @@
 """Validate a run and export one portable MAMMA observation inventory."""
 import json
-import os
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
 from .mamma_crop import mask_native_support
+from human_data_generator.runtime.task_paths import run_config, task_path, task_ref
 
 
 def _read(path):
@@ -21,32 +21,28 @@ def _ids(values):
 
 
 def _relative(path, run):
-    return os.path.relpath(Path(path).resolve(),run)
+    return task_ref(run,path)
 
 
 def export_existing(run):
     """Validate selected frames, all cameras and all targets; never rewrite pixels."""
     run = Path(run).resolve()
-    config = _read(run/'run_config.json')
-    recipe = _read(run/'recipe.json')
-    spec = _read(run/'multirig.json')
+    config = run_config(run)
+    recipe = _read(task_path(run,'recipe.json'))
     frames = config['selected_frames']
     if not frames or frames != sorted(set(frames)) or any(type(k) is not int or k < 0 or k >= recipe['frame_count'] for k in frames):
         raise ValueError('invalid_selected_frames')
     people = recipe['people']
     pids = _ids([p['person_id'] for p in people])
-    rigs = spec['rigs']
-    rig_ids = [r['rig_id'] for r in rigs]
+    rig_ids = config['rig_ids']
     if not rig_ids or len(rig_ids) != len(set(rig_ids)):
         raise ValueError('invalid_rig_ids')
     rows = []
     cameras_seen = set()
     template_order = None
     template_name = None
-    for rig in rigs:
-        rid = rig['rig_id']
-        root = Path(rig['root']).resolve()
-        if root!=run/'rigs'/rid:raise ValueError('rig_root_conflict')
+    for rid in rig_ids:
+        root = task_path(run,f'rigs/{rid}')
         rig_info=_read(root/'rig.json')
         if rig_info['rig_id']!=rid:raise ValueError('rig_identity_conflict')
         camera_ids = [c['id'] for c in rig_info['cameras']]

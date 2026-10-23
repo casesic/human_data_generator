@@ -16,6 +16,7 @@ from human_data_generator.camera.domain import point_in_view
 from human_data_generator.camera.visibility import erp_visibility_points
 from human_data_generator.data.dynamic_scene import frame_record, geometry_paths
 from human_data_generator.data.occlusion_events import point_occlusion_evidence
+from human_data_generator.runtime.task_paths import task_path
 
 
 SCHEMA='mamma_512_label_v1'
@@ -47,7 +48,7 @@ def ordered_vertex_ids(template_path):
 def load_world_body(recipe,root,frame,template_path):
     """Load exact asset frames and apply scene_from_model exactly once."""
     root=Path(root);ids=ordered_vertex_ids(template_path);timing=frame_record(recipe,frame)
-    matrices=np.load(recipe.get('scene_matrices_ref',root/'scene_matrices.npy'),mmap_mode='r')
+    matrices=np.load(task_path(root,'scene_matrices.npy'),mmap_mode='r')
     if matrices.shape[:2]!=(recipe['frame_count'],len(recipe['people'])):raise ValueError('scene_matrix_shape_conflict')
     selected=[];full=[];faces=[];asset_frames=[];source_frames=[]
     records=timing.get('person_records')

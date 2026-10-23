@@ -4,7 +4,6 @@ Import only inside Blender. Creation order, node names and numeric expressions
 are retained from the two historical ERP renderers. No scene loading occurs here.
 """
 
-import json
 import math
 import bpy
 import numpy as np
@@ -101,10 +100,11 @@ def create_erp_camera(s):
     return cam
 
 
-def render_cameras(s, cam, file_node, cameras_path, output_dir):
+def render_cameras(s, cam, file_node, camera, output_dir, task_root):
     """CV camera-to-world -> Blender right/up/back axes; render and resolve legacy filenames."""
+    from human_data_generator.runtime.task_paths import task_ref
     records = []
-    for item in json.loads(cameras_path.read_text())["cameras"]:
+    for item in (camera,):
         pose = np.asarray(item["camera_to_world"], float)
         r = pose[:3, :3]
         # Blender local axes: X right, Y up, -Z forward. CV: X right, Y down, Z forward.
@@ -132,7 +132,7 @@ def render_cameras(s, cam, file_node, cameras_path, output_dir):
         records.append(
             {
                 "id": item["id"],
-                "source": str(target.resolve()),
+                "source": task_ref(task_root,target),
                 "camera_to_world": item["camera_to_world"],
             }
         )

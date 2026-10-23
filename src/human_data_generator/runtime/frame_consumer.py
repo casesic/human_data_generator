@@ -14,18 +14,15 @@ import sys
 import time
 import traceback
 
+from human_data_generator.runtime.task_paths import run_config, task_path
+
 
 def serve_frames(root, consume, *, incoming=None, outgoing=None):
-    root = Path(root)
+    root = Path(root).resolve()
     incoming = sys.stdin if incoming is None else incoming
     outgoing = sys.stdout if outgoing is None else outgoing
-    frame_count = json.loads((root / 'recipe.json').read_text())['frame_count']
-    multi_path=root/'multirig.json'
-    entries=json.loads(multi_path.read_text())['rigs'] if multi_path.exists() else None
-    rig_roots={r['rig_id']:Path(r['root']) for r in entries} if entries is not None else None
-    if rig_roots is not None and (not 1 <= len(entries) <= 8 or len(rig_roots)!=len(entries)
-                                  or any(not p.is_dir() for p in rig_roots.values())):
-        raise ValueError('invalid_multirig_consumer_roots')
+    config = run_config(root)
+    rig_roots = {rid: task_path(root,f'rigs/{rid}') for rid in config['rig_ids']}
     completed = []
 
     def reply(value):
@@ -46,16 +43,14 @@ def serve_frames(root, consume, *, incoming=None, outgoing=None):
                 raise ValueError('unknown consumer command')
             frame = request.get('frame')
             rig_id=request.get('rig_id')
-            if rig_roots is None and rig_id is not None:
-                raise ValueError('rig_id_not_allowed_for_single_rig')
-            if rig_roots is not None and rig_id not in rig_roots:
+            if rig_id not in rig_roots:
                 raise ValueError('unknown_rig_id')
-            key=[frame,rig_id] if rig_roots is not None else frame
-            if type(frame) is not int or not 0 <= frame < frame_count or key in completed:
+            key=[frame,rig_id]
+            if type(frame) is not int or frame not in config['selected_frames'] or key in completed:
                 raise ValueError('invalid or duplicate frame')
             start = time.monotonic()
             # stdout is the protocol only; per-frame diagnostics remain on disk.
-            task_root=rig_roots[rig_id] if rig_roots is not None else root
+            task_root=rig_roots[rig_id]
             with (task_root / f'frame_{frame:03d}' / 'consume.log').open('w') as log:
                 with redirect_stdout(log):
                     consume(task_root, frame)
@@ -124,10 +119,10 @@ class FrameConsumer:
         self.process.stdin.write((json.dumps(value)+'\n').encode())
         self.process.stdin.flush()
 
-    def consume(self, frame, rig_id=None):
+    def consume(self, frame, rig_id):
         start = time.monotonic()
         request=dict(command='frame',frame=frame)
-        if rig_id is not None:request['rig_id']=rig_id
+        request['rig_id']=rig_id
         self._send(request)
         response = self._receive()
         if response.get('status') != 'ok' or response.get('frame') != frame or response.get('rig_id') != rig_id:
@@ -140,7 +135,7 @@ class FrameConsumer:
         start = time.monotonic()
         self._send(dict(command='stop'))
         response = self._receive()
-        expected=[[r['frame'],r['rig_id']] if r['rig_id'] is not None else r['frame'] for r in self.responses]
+        expected=[[r['frame'],r['rig_id']] for r in self.responses]
         if response.get('status') != 'stopped' or response.get('completed_frames') != expected:
             raise RuntimeError(f'CPU consumer shutdown mismatch: {response}')
         self.process.stdin.close()

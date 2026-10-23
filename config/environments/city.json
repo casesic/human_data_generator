@@ -2,10 +2,6 @@
   "hide_objects": [
     "Soft daylight fill"
   ],
-  "expected_blend_stat": {
-    "size_bytes": 219499893,
-    "mtime_ns": 1789891215673304566
-  },
   "schema": "human_environment_v1",
   "blend_path": "/mnt/data1/yy/home/yy/Projects/densekp_retrain/assets/scenes/photoreal/urban_street/urban_street_assets.blend",
   "road_object_names": [

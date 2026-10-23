@@ -3,51 +3,40 @@
 The recipe owns root/ground/rig placement. No automatic per-frame grounding,
 motion-source selection or clothing rebinding occurs in this consumer.
 """
-import argparse
 import json
 import os
 from pathlib import Path
 import resource
-import sys
 import time
 import bpy
 import numpy as np
 from mathutils import Matrix,Vector
-from human_data_generator.config import PROJECT_ROOT
-ROOT=PROJECT_ROOT
-from human_data_generator.rendering.blender.assembly import configure_render,configure_compositor,create_erp_camera,render_cameras,create_mesh_object
+from human_data_generator.rendering.blender.assembly import configure_render,configure_compositor,create_erp_camera,create_mesh_object
 from human_data_generator.rendering.blender.materials import apply_character_materials,add_clothing_materials
 from human_data_generator.rendering.blender.groom import add_groom
 from human_data_generator.data.dynamic_scene import geometry_paths,frame_record,support_limits,ROOT_MODE
+from human_data_generator.runtime.task_paths import run_config as load_run_config, task_path
 
 def write(p,x):p.write_text(json.dumps(x,indent=2,allow_nan=False)+'\n')
 
 _SESSION=None
 
 
-def main(*, render_cameras_fn=None, frame_complete_fn=None, frame_source_dir_fn=None,
+def main(*, root, render_cameras_fn, frame_complete_fn, frame_source_dir_fn,
          reuse_session=False):
-    # Optional experiment hook; default command and body/cloth/groom lifecycle
-    # are unchanged. The hook receives the fully assembled scene and ERP camera.
-    camera_renderer = render_cameras if render_cameras_fn is None else render_cameras_fn
-    ap=argparse.ArgumentParser();ap.add_argument('--job',type=Path,required=True)
-    a=ap.parse_args(sys.argv[sys.argv.index('--')+1:]);job=json.loads(a.job.read_text());ep=json.loads(Path(job['recipe']).read_text())
-    run_config=json.loads((a.job.parent/'run_config.json').read_text())
-    render=dict(ep['render'],gpu_uuid=run_config['gpu_uuid']);began=time.monotonic()
+    root=Path(root).resolve()
+    config=load_run_config(root)
+    ep=json.loads(task_path(root,'recipe.json').read_text())
+    frames=config['selected_frames']
+    render=dict(ep['render'],gpu_uuid=config['gpu_uuid']);began=time.monotonic()
     assert ep['geometry_acceptance']=='passed' and os.environ.get('CUDA_VISIBLE_DEVICES')==render['gpu_uuid']
-    assert 1<=len(ep['people'])<=5 and job['frames']
-    assert job['frames']==sorted(set(job['frames'])) and all(0<=k<ep['frame_count'] for k in job['frames'])
-    if frame_source_dir_fn is None:
-        raise ValueError('frame_source_callback_required')
-    folders=[Path(frame_source_dir_fn(frame)) for frame in job['frames']]
-    if len(folders)!=len(job['frames']):raise ValueError('frame_source_count_mismatch')
+    assert 1<=len(ep['people'])<=5 and frames
+    assert all(k<ep['frame_count'] for k in frames)
+    folders=[Path(frame_source_dir_fn(frame)) for frame in frames]
+    if len(folders)!=len(frames):raise ValueError('frame_source_count_mismatch')
     cfg=json.loads(Path(ep['scene']).read_text())
     if cfg.get('schema')!='human_environment_v1':raise ValueError('current_environment_required')
     blend=Path(cfg['blend_path']).resolve()
-    if 'expected_blend_stat' in cfg:
-        actual=blend.stat();expected=cfg['expected_blend_stat']
-        if (actual.st_size,actual.st_mtime_ns)!=(expected['size_bytes'],expected['mtime_ns']):
-            raise ValueError('environment_blend_dependency_changed')
     global _SESSION
     asset_key=tuple((p['person_id'],p['asset_manifest'],
                      Path(p['asset_manifest']).stat().st_size,
@@ -66,7 +55,7 @@ def main(*, render_cameras_fn=None, frame_complete_fn=None, frame_source_dir_fn=
         # The forest scatter LOD references Camera1. Keep one fixed anchor for
         # both calibrated cameras and every frame, never switch it per view.
         anchor=s.objects[cfg['lod_camera_anchor_object']]
-        rig=json.loads(Path(job['rig']).read_text())['cameras']
+        rig=json.loads(task_path(root,f'rigs/{config["rig_ids"][0]}/rig.json').read_text())['cameras']
         anchor.location=tuple(sum(float(c['camera_to_world'][j][3]) for c in rig)/len(rig) for j in range(3))
         bpy.context.view_layer.update()
     if not warm:
@@ -93,16 +82,16 @@ def main(*, render_cameras_fn=None, frame_complete_fn=None, frame_source_dir_fn=
         bpy.context.view_layer.update()
     # Probe native road before importing any people. Constant transform throughout.
     ground=[];loaded=[]
-    shared_matrices=np.load(ep['scene_matrices_ref'],mmap_mode='r')
+    shared_matrices=np.load(task_path(root,'scene_matrices.npy'),mmap_mode='r')
     if shared_matrices.shape!=(ep['frame_count'],len(ep['people']),4,4):
         raise ValueError('scene_matrices_shape_conflict')
     for person_index,p in enumerate(ep['people']):
         asset=json.loads(Path(p['asset_manifest']).read_text());g=geometry_paths(asset);v=np.load(g['body_vertices'],mmap_mode='r')
         matrices=shared_matrices[:,person_index]
         asset_frames=[row['asset_frame'] for row in ep['person_timelines'][str(p['person_id'])]]
-        if any(type(asset_frames[k]) is not int or not 0<=asset_frames[k]<len(v) for k in job['frames']):raise ValueError('asset_frame_out_of_bounds')
+        if any(type(asset_frames[k]) is not int or not 0<=asset_frames[k]<len(v) for k in frames):raise ValueError('asset_frame_out_of_bounds')
         bounds=support_limits(p);cycling=p['root_mode']==ROOT_MODE
-        for k in job['frames']:
+        for k in frames:
             M=matrices[k]
             world=v[asset_frames[k]]@M[:3,:3].T+M[:3,3];low=world[world[:,2]<world[:,2].min()+.02][::10];gaps=[];names=[]
             for x in low:
@@ -117,13 +106,12 @@ def main(*, render_cameras_fn=None, frame_complete_fn=None, frame_source_dir_fn=
                 gaps.append(float(x[2]-point.z));names.append(obj.name)
             ground.append(dict(person_id=p['person_id'],frame_index=k,min_gap_m=min(gaps),max_gap_m=max(gaps),hit_objects=sorted(set(names))))
             if min(gaps)<bounds[0] or max(gaps)>bounds[1]:
-                write(a.job.parent/(a.job.stem+'_ground_failure.json'),ground)
+                write(root/'assembly_ground_failure.json',ground)
                 raise ValueError(f'Road support outside explicit {bounds} gate: {ground[-1]}')
         loaded.append((p,asset,g,v,matrices,asset_frames))
-    write(a.job.parent/(a.job.stem+'_ground.json'),ground)
+    write(root/'assembly_ground.json',ground)
     for obj,was_hidden in hidden:obj.hide_set(was_hidden)
     if hidden:bpy.context.view_layer.update()
-    if job.get('ground_only',False):return
     objects=[]
     if warm:
         for (p,asset,g,v,matrices,asset_frames),prior in zip(loaded,_SESSION['objects']):
@@ -131,8 +119,8 @@ def main(*, render_cameras_fn=None, frame_complete_fn=None, frame_source_dir_fn=
         camera=_SESSION['camera'];file_node=_SESSION['file_node']
     else:
         for p,asset,g,v,matrices,asset_frames in loaded:
-            M=matrices[job['frames'][0]]
-            m=json.loads(Path(asset['character_manifest']).read_text());ix=asset_frames[job['frames'][0]];faces=np.load(g['body_faces']);cloth=Path(asset['clothing_reference'])
+            M=matrices[frames[0]]
+            m=json.loads(Path(asset['character_manifest']).read_text());ix=asset_frames[frames[0]];faces=np.load(g['body_faces']);cloth=Path(asset['clothing_reference'])
             body,mesh=create_mesh_object(s,f'Body{p["person_id"]}',v[ix],faces,p['person_id']);body.matrix_world=Matrix(M.tolist());apply_character_materials(mesh,faces,m['appearance'])
             cv=np.load(g['cloth_vertices'],mmap_mode='r');garment,cm=create_mesh_object(s,f'Clothes{p["person_id"]}',cv[ix],np.load(g['cloth_faces']),p['person_id']);garment.matrix_world=body.matrix_world;add_clothing_materials(cm,cloth)
             for mesh in [mesh,cm]:
@@ -144,8 +132,8 @@ def main(*, render_cameras_fn=None, frame_complete_fn=None, frame_source_dir_fn=
         if reuse_session:
             _SESSION=dict(key=key,scene=s,objects=objects,camera=camera,file_node=file_node)
     setup=time.monotonic()-began;timings=[]
-    deadline=json.loads((a.job.parent/'run_config.json').read_text())['deadline_monotonic']
-    for frame,folder in zip(job['frames'],folders):
+    deadline=config['deadline_monotonic']
+    for frame,folder in zip(frames,folders):
         if time.monotonic()>deadline:raise RuntimeError('Render budget exhausted; failed scene retained')
         start=time.monotonic();folder=Path(folder)
         if hasattr(file_node,'directory'):file_node.directory=str(folder)
@@ -175,39 +163,28 @@ def main(*, render_cameras_fn=None, frame_complete_fn=None, frame_source_dir_fn=
                     raise AssertionError(f'groom_world_changed:frame={frame}:person={p["person_id"]}:'
                                          f'max_abs_m={np.nanmax(head_delta)}')
             check=np.empty(v[ix].size,np.float32);body.data.vertices.foreach_get('co',check);np.testing.assert_array_equal(check.reshape(-1,3),v[ix])
-            if frame_complete_fn is not None:
-                cloth_check=np.empty(cv[ix].size,np.float32)
-                garment.data.vertices.foreach_get('co',cloth_check)
-                np.testing.assert_array_equal(cloth_check.reshape(-1,3),cv[ix])
-                np.testing.assert_array_equal(np.asarray(garment.matrix_world),np.asarray(body.matrix_world))
+            cloth_check=np.empty(cv[ix].size,np.float32)
+            garment.data.vertices.foreach_get('co',cloth_check)
+            np.testing.assert_array_equal(cloth_check.reshape(-1,3),cv[ix])
+            np.testing.assert_array_equal(np.asarray(garment.matrix_world),np.asarray(body.matrix_world))
             actual_matrix=np.asarray(body.matrix_world)
             np.testing.assert_array_equal(actual_matrix.astype(np.float32),M.astype(np.float32))
         bpy.context.view_layer.update()
         geometry_seconds=time.monotonic()-start
-        if render_cameras_fn is None:
-            sources=camera_renderer(s,camera,file_node,Path(job['rig']),folder)
-        else:
-            sources=camera_renderer(s,camera,file_node,Path(job['rig']),folder,frame_index=frame)
+        sources=render_cameras_fn(s,camera,file_node,folder,frame_index=frame)
         elapsed=time.monotonic()-start
         timing=frame_record(ep,frame)
-        manifest=dict(sources=sources,frame_index=frame,time_tick=timing['episode_time_tick'],time_base=timing['time_base'],selected_time_record=timing,episode_recipe=job['recipe'],
+        manifest=dict(sources=sources,frame_index=frame,time_tick=timing['episode_time_tick'],time_base=timing['time_base'],selected_time_record=timing,episode_recipe='recipe.json',
             source_resolution=render['source_resolution'],blender_version=bpy.app.version_string,samples=render['samples'],
             gpu_uuid=render['gpu_uuid'],devices=devices,denoising=False,adaptive_sampling=False,render_seconds=elapsed,
             body_readback_exact=True,head_transform_once=True,groom_topology_fixed=True,
             native_scene_max_bounces=s.cycles.max_bounces,world_transform_owner='shared scene matrices',root_owner='scene trajectory',
             people_state=[dict(person_id=p['person_id'],asset_frame=asset_frames[frame],scene_from_model=matrices[frame].tolist()) for p,asset,v,cv,H,matrices,body,garment,hair,counts,asset_frames in objects])
         consume_start=time.monotonic()
-        if frame_complete_fn is not None:
-            # The consumer owns persistence: multi-rig writes one manifest per
-            # rig; writing an aggregate here would duplicate or overwrite it.
-            frame_complete_fn(frame,folder,manifest)
-        else:
-            write(folder/'source_manifest.json',manifest)
+        frame_complete_fn(frame,folder,manifest)
         timings.append(dict(frame_index=frame,seconds=time.monotonic()-start,
             geometry_seconds=geometry_seconds,render_callback_seconds=elapsed-geometry_seconds,
             consumer_callback_seconds=time.monotonic()-consume_start))
-        write(a.job.parent/(a.job.stem+'_progress.json'),dict(setup_seconds=setup,elapsed_seconds=time.monotonic()-began,frames=timings))
+        write(root/'assembly_progress.json',dict(setup_seconds=setup,elapsed_seconds=time.monotonic()-began,frames=timings))
         print('ROAD_PASS_FRAME_DONE',frame,elapsed,flush=True)
-    write(a.job.parent/(a.job.stem+'_result.json'),dict(setup_seconds=setup,elapsed_seconds=time.monotonic()-began,frames=timings,gpu_uuid=render['gpu_uuid'],peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,devices=devices,scene_reused=warm))
-
-if __name__=='__main__':main()
+    write(root/'assembly_result.json',dict(setup_seconds=setup,elapsed_seconds=time.monotonic()-began,frames=timings,gpu_uuid=render['gpu_uuid'],peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,devices=devices,scene_reused=warm))

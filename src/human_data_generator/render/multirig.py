@@ -18,18 +18,20 @@ from human_data_generator.imaging.output_modes import prepare_source_workspace
 from human_data_generator.runtime.frame_consumer import FrameConsumer
 from human_data_generator.render import assembly
 from human_data_generator.render.roi import render_rig_roi,scene_settings,write
+from human_data_generator.runtime.task_paths import run_config, task_path
 
 
 def main(root=None, *, reuse_session=False):
     root=Path(sys.argv[sys.argv.index('--root')+1] if root is None else root).resolve()
-    spec=json.loads((root/'multirig.json').read_text())
-    recipe=json.loads((root/'recipe.json').read_text())
-    config=json.loads((root/'run_config.json').read_text())
+    config=run_config(root)
+    recipe=json.loads(task_path(root,'recipe.json').read_text())
     rigs=[]
-    for entry in spec['rigs']:
-        rig_root=Path(entry['root'])
-        rig_recipe=dict(recipe,rig_id=entry['rig_id'],roi_planning_policy='per_person_square_union_v1')
-        rigs.append((entry['rig_id'],rig_root,rig_recipe,json.loads((rig_root/'rig.json').read_text())['cameras']))
+    for rig_id in config['rig_ids']:
+        rig_root=task_path(root,f'rigs/{rig_id}')
+        rig_recipe=dict(recipe,rig_id=rig_id,roi_planning_policy='per_person_square_union_v1')
+        rig_info=json.loads(task_path(root,f'rigs/{rig_id}/rig.json').read_text())
+        if rig_info['rig_id']!=rig_id:raise ValueError('rig_identity_conflict')
+        rigs.append((rig_id,rig_root,rig_recipe,rig_info['cameras']))
     planned={rig_id:json.loads((rig_root/'planned_regions.json').read_text())
              for rig_id,rig_root,_,_ in rigs if (rig_root/'planned_regions.json').exists()}
     if not 1 <= len(rigs) <= 8 or len({r[0] for r in rigs})!=len(rigs):
@@ -39,8 +41,7 @@ def main(root=None, *, reuse_session=False):
     for _,_,rig_recipe,cameras in rigs:
         if [c['id'] for c in cameras] != ['cam2','cam4']:
             raise ValueError('paired_camera_identity_conflict')
-    prior_calls=sum(json.loads(line)['event']=='started' for line in (root/'render_calls.jsonl').read_text().splitlines()) if (root/'render_calls.jsonl').exists() else 0
-    start=time.monotonic();calls=prior_calls;updates=[];rendered={};signature=None;hair_cache={}
+    start=time.monotonic();calls=0;updates=[];rendered={};signature=None;hair_cache={}
     ids={p['person_id'] for p in recipe['people']}
     def append(value):
         with (root/'render_calls.jsonl').open('a') as f:f.write(json.dumps(value)+'\n')
@@ -51,9 +52,10 @@ def main(root=None, *, reuse_session=False):
     write(root/'consumer_worker_start.json',dict(pid=worker.process.pid,startup_seconds=worker.startup_seconds))
     def frame_source_dir(frame):
         for _,rig_root,_,_ in rigs:
-            prepare_source_workspace(rig_root/f'frame_{frame:03d}','compact')
+            prepare_source_workspace(rig_root/f'frame_{frame:03d}','compact',
+                                     task_root=root,task_id=config['task_id'])
         return rigs[0][1]/f'frame_{frame:03d}'/'_temporary_ds_source/source'
-    def render(scene,cam,node,cameras_path,folder,*,frame_index):
+    def render(scene,cam,node,folder,*,frame_index):
         nonlocal calls,signature
         frame=frame_index
         if scene_settings(scene)!=config['scene_settings']:
@@ -99,7 +101,7 @@ def main(root=None, *, reuse_session=False):
                 append(dict(event='started',call=calls,frame_index=frame_index,rig_id=rig_id,
                             camera_id=camera_id,kind=kind,roi_xyxy=roi,resolution=resolution,samples=samples))
                 return calls
-            result=render_rig_roi(scene,cam,node,rig_folder,rig_root,rig_recipe,cameras,
+            result=render_rig_roi(scene,cam,node,rig_folder,root,rig_recipe,cameras,
                                   world_parts,owners,config,frame,call_started)
             if rig_id in planned:
                 actual=json.loads((rig_folder/'roi_plan.json').read_text())['cameras']
@@ -114,36 +116,25 @@ def main(root=None, *, reuse_session=False):
     def consume(frame,folder,manifest):
         for rig_id,rig_root,rig_recipe,cameras in rigs:
             source=rig_root/f'frame_{frame:03d}'/'_temporary_ds_source/source'
-            child=dict(manifest,sources=rendered[frame][rig_id]['records'],episode_recipe=str(root/'recipe.json'),
+            child=dict(manifest,sources=rendered[frame][rig_id]['records'],episode_recipe='recipe.json',
                        scene_episode_id=recipe['scene_episode_id'],rig_id=rig_id)
             write(source/'source_manifest.json',child)
             response=worker.consume(frame,rig_id)
             write(rig_root/f'frame_{frame:03d}'/'consumer_process.json',
                   dict(mode='persistent_multirig',rig_id=rig_id,worker_response=response))
             write(root/'unit_progress.json',dict(completed_units=[dict(frame_index=r['frame'],rig_id=r['rig_id'])
-                                                        for r in worker.responses],prior_completed_units=config.get('prior_completed_units',[])))
-    sys.argv=[sys.argv[0],'--','--job',str(root/'job.json')]
+                                                        for r in worker.responses]))
     try:
-        for unit in config.get('reprocess_units_before_render',[]):
-            frame,rig_id=unit['frame_index'],unit['rig_id']
-            source=root/'rigs'/rig_id/f'frame_{frame:03d}'/'_temporary_ds_source/source'
-            if not (source/'source_manifest.json').is_file() or not (source/'roi_plan.json').is_file():
-                raise ValueError('missing_owned_buffer_for_reprocess')
-            response=worker.consume(frame,rig_id)
-            write(root/'rigs'/rig_id/f'frame_{frame:03d}'/'consumer_process.json',
-                  dict(mode='persistent_multirig_reprocess',rig_id=rig_id,worker_response=response))
-            write(root/'unit_progress.json',dict(completed_units=[dict(frame_index=r['frame'],rig_id=r['rig_id'])
-                                                        for r in worker.responses],prior_completed_units=config.get('prior_completed_units',[])))
-        assembly.main(render_cameras_fn=render,frame_complete_fn=consume,
+        assembly.main(root=root,render_cameras_fn=render,frame_complete_fn=consume,
                       frame_source_dir_fn=frame_source_dir,reuse_session=reuse_session)
         write(root/'consumer_worker_result.json',worker.close())
     except BaseException:
         worker.abort()
         raise
-    scene_reused=json.loads((root/'job_result.json').read_text()).get('scene_reused',False)
+    scene_reused=json.loads((root/'assembly_result.json').read_text()).get('scene_reused',False)
     write(root/'multirig_render_result.json',dict(scene_load_count=0 if scene_reused else 1,scene_reused=scene_reused,
         normal_path_geometry_updates=len(updates),
-        camera_calls_this_process=calls-prior_calls,camera_calls_cumulative=calls,rig_order=[r[0] for r in rigs],consumer_process_count=1,
+        camera_calls=calls,rig_order=[r[0] for r in rigs],consumer_process_count=1,
         elapsed_seconds=time.monotonic()-start,peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
 
 

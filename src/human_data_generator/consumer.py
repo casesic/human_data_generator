@@ -15,6 +15,7 @@ from .imaging.output_modes import complete_output
 from .imaging.regions import embed_region, apply_physical_mask
 from .imaging.source import read_ds_source
 from .runtime.frame_consumer import serve_frames
+from .runtime.task_paths import run_config, task_path
 
 
 def _read(path):return json.loads(Path(path).read_text())
@@ -22,13 +23,17 @@ def _read(path):return json.loads(Path(path).read_text())
 def _write(path,value):Path(path).write_text(json.dumps(value,indent=2,allow_nan=False)+'\n')
 
 def _recipe(root):
-    recipe=_read(Path(root).parent.parent/'recipe.json')
-    recipe['rig_id']=Path(root).name
+    root=Path(root).resolve();task_root=root.parent.parent
+    recipe=_read(task_path(task_root,'recipe.json'))
+    recipe['rig_id']=root.name
     return recipe
 
 def _config(root):
-    config=_read(Path(root).parent.parent/'run_config.json')
-    config['valid_masks']=_read(Path(root)/'rig.json')['valid_masks']
+    root=Path(root).resolve();task_root=root.parent.parent
+    config=run_config(task_root)
+    if root.name not in config['rig_ids'] or root!=task_path(task_root,f'rigs/{root.name}'):
+        raise ValueError('consumer_rig_not_in_task')
+    config['valid_masks']=_read(task_path(task_root,f'rigs/{root.name}/rig.json'))['valid_masks']
     return config
 
 
@@ -49,7 +54,7 @@ def _annotation(recipe, geometry, frame, camera, pose):
 
 def consume_camera_arrays(root,frame,camera,local_rgb,local_range,local_instance,roi,pose,valid_full,geometry):
     """The same array boundary serves actual EXR input and tiny CPU fixtures."""
-    root=Path(root);recipe=_recipe(root);config=_config(root)
+    root=Path(root).resolve();recipe=_recipe(root);config=_config(root)
     contract=config.get('generation_contract')
     if contract not in ('mamma_512_v1','preview_rgb_v1'):raise ValueError('unsupported_generation_contract')
     ids=[p['person_id'] for p in recipe['people']]
@@ -90,7 +95,7 @@ def consume_camera_arrays(root,frame,camera,local_rgb,local_range,local_instance
 
 
 def consume_frame(root,frame):
-    root=Path(root);recipe=_recipe(root);config=_config(root)
+    root=Path(root).resolve();recipe=_recipe(root);config=_config(root)
     contract=config.get('generation_contract')
     if contract not in ('mamma_512_v1','preview_rgb_v1'):raise ValueError('unsupported_generation_contract')
     source=root/f'frame_{frame:03d}'/'_temporary_ds_source/source'
@@ -98,7 +103,7 @@ def consume_frame(root,frame):
     timing=frame_record(recipe,frame)
     if manifest['selected_time_record']!=timing:raise ValueError('render_consumer_time_conflict')
     if contract=='mamma_512_v1':
-        label_cfg=config['mamma_512_label'];geometry=load_world_body(recipe,root.parent.parent,frame,label_cfg['template_path'])
+        label_cfg=config['mamma_512_label'];geometry=load_world_body(recipe,root.resolve().parent.parent,frame,label_cfg['template_path'])
         policy_path=root/'label_policy.json';policy=policy_record()
         if policy_path.exists():
             if _read(policy_path)!=policy:raise ValueError('label_policy_changed')
@@ -116,13 +121,14 @@ def consume_frame(root,frame):
             local.instance,roi,info['camera_to_world'],valid,geometry))
     _write(root/f'frame_{frame:03d}'/'report.json',dict(frame_index=frame,cameras=reports,status='passed'))
     complete_output(root/f'frame_{frame:03d}','compact',source,
+        task_root=root.resolve().parent.parent,task_id=config['task_id'],
         checks=dict(cameras=len(reports),people=len(recipe['people']),mamma_512=contract=='mamma_512_v1'))
     return reports
 
 
 def finish(root):
     """Check selected camera products; video is a separate optional stage."""
-    root=Path(root);recipe=_recipe(root);config=_config(root)
+    root=Path(root).resolve();recipe=_recipe(root);config=_config(root)
     frames=config['selected_frames'];cameras=[c['id'] for c in _read(root/'rig.json')['cameras']]
     for frame in frames:
         for camera in cameras:
@@ -136,7 +142,7 @@ def finish(root):
 
 
 def make_video(root):
-    root=Path(root);recipe=_recipe(root);config=_config(root)
+    root=Path(root).resolve();recipe=_recipe(root);config=_config(root)
     frames=config['selected_frames'];cameras=[c['id'] for c in _read(root/'rig.json')['cameras']]
     if not (root/'finish.json').is_file():raise ValueError('data_finish_required_before_video')
     if len(cameras)!=2:raise ValueError('paired_cameras_required_for_video')
