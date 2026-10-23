@@ -1,5 +1,6 @@
 """Bounded CPU checks for the single current generation/data path."""
 import json
+from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 import tempfile
@@ -9,6 +10,7 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
+from human_data_generator import batch
 from human_data_generator.batch import sample_scene
 from human_data_generator.components import describe,select
 from human_data_generator.composition import build,_cached,_key
@@ -164,10 +166,24 @@ class CurrentPipelineTest(unittest.TestCase):
                 self.assertEqual(json.loads(Path(saved['path']).read_text())['people'][0]['hair'],'M01_groom')
 
     def test_scene_sampling_and_clock(self):
-        a=sample_scene('city_crossing_pair',20261023,2)
-        b=sample_scene('city_crossing_pair',20261023,2)
+        rules=json.loads((PROJECT_ROOT/'config/batch_rules.json').read_text())
+        self.assertEqual(len(rules['scenes']),4)
+        for i,item in enumerate(rules['scenes']):
+            self.assertEqual(sample_scene(item,rules['seed'],i)['schema'],'human_scene_v2')
+        rule=rules['scenes'][2]
+        a=sample_scene(rule,rules['seed'],2)
+        b=sample_scene(rule,rules['seed'],2)
         self.assertEqual(a,b)
         self.assertTrue(all(k in a['people'][0] for k in ('body','motion','clothing','hair')))
+        custom=deepcopy(rule)
+        custom['scene_id']='custom_pair'
+        custom['people'][0]['speed_m_s']=[1.05,1.05]
+        custom['people'][0]['route_start_xy_range_m'][0]=[-1.2,-1.2]
+        changed=sample_scene(custom,rules['seed'],2)
+        self.assertEqual(changed['scene_id'],'batch_002_custom_pair')
+        self.assertEqual(changed['people'][0]['speed_m_s'],1.05)
+        self.assertEqual(changed['people'][0]['route_xy_m'][0][0],-1.2)
+        with self.assertRaises(ValueError):sample_scene('city_crossing_pair',rules['seed'],2)
         inventory=describe()
         self.assertGreaterEqual(inventory['counts']['bodies']['ready'],10)
         a=default_scene('city');a['frame_count']=2
@@ -193,6 +209,107 @@ class CurrentPipelineTest(unittest.TestCase):
         a['people'][0].pop('asset')
         a['qualification_registry']='unsupported'
         with self.assertRaisesRegex(ValueError,'scene_fields'):validate_scene(a)
+
+    def test_batch_component_candidate_pools(self):
+        rules=json.loads((PROJECT_ROOT/'config/batch_rules.json').read_text())
+        rule=deepcopy(rules['scenes'][0]);pool=rule['people'][0]['components']
+        pool['body']['ids']=['M03','M01']
+        pool['motion']['ids']=['KIT425_walk','KIT11_walk']
+        pool['clothing']['ids']=['M03_simple','M01_simple']
+        pool['hair']['ids']=['M03_groom','M01_groom']
+        chosen=sample_scene(rule,rules['seed'],0)
+        self.assertIn(chosen['people'][0]['body'],pool['body']['ids'])
+        self.assertIn(chosen['people'][0]['motion'],pool['motion']['ids'])
+        self.assertIn(chosen['people'][0]['clothing'],pool['clothing']['ids'])
+        self.assertIn(chosen['people'][0]['hair'],pool['hair']['ids'])
+        reordered=deepcopy(rule)
+        for item in reordered['people'][0]['components'].values():item['ids'].reverse()
+        self.assertEqual(chosen,sample_scene(reordered,rules['seed'],0))
+
+        fixed=deepcopy(rule);pool=fixed['people'][0]['components']
+        pool['body']={'default_versions_only':False,'ids':['F04_v1']}
+        pool['motion']['ids']=['KIT11_walk']
+        pool['clothing']['ids']=['M03_simple']
+        pool['hair']['ids']=['M01_groom']
+        person=sample_scene(fixed,rules['seed'],0)['people'][0]
+        self.assertEqual((person['body'],person['motion'],person['clothing'],person['hair']),
+                         ('F04_v1','KIT11_walk','M03_simple','M01_groom'))
+        pool['body']['default_versions_only']=True
+        with self.assertRaisesRegex(ValueError,'batch_component_filter_conflict'):
+            sample_scene(fixed,rules['seed'],0)
+
+        pair=deepcopy(rules['scenes'][2])
+        for spec,ident in zip(pair['people'],('M01','M03')):
+            spec['components']['body']['ids']=[ident]
+        self.assertEqual([p['body'] for p in sample_scene(pair,rules['seed'],2)['people']],
+                         ['M01','M03'])
+
+    def test_batch_locked_clothing_and_rejections(self):
+        rules=json.loads((PROJECT_ROOT/'config/batch_rules.json').read_text())
+        rule=deepcopy(rules['scenes'][0]);rule['frame_count']=2
+        spec=rule['people'][0];pool=spec['components']
+        pool['body']['ids']=['M03']
+        pool['motion']['ids']=['KIT11_walk']
+        pool['clothing']={'kinds':['native_locked'],'ids':['M03_KIT11_BEDLAM_transfer']}
+        spec['motion_start']=[0,0]
+        self.assertEqual(sample_scene(rule,rules['seed'],0)['people'][0]['clothing'],
+                         'M03_KIT11_BEDLAM_transfer')
+        for kind,ident in (('body','M01'),('motion','KIT425_walk')):
+            bad=deepcopy(rule);bad['people'][0]['components'][kind]['ids']=[ident]
+            with self.assertRaisesRegex(ValueError,'native_clothing_body_motion_or_window_conflict'):
+                sample_scene(bad,rules['seed'],0)
+        inventory=deepcopy(describe())
+        locked=next(row for row in inventory['clothing'] if row['id']=='M03_KIT11_BEDLAM_transfer')
+        locked['locked_window']=[0,1]
+        with patch('human_data_generator.batch.describe',return_value=inventory):
+            with self.assertRaisesRegex(ValueError,'native_clothing_body_motion_or_window_conflict'):
+                sample_scene(rule,rules['seed'],0)
+        bad=deepcopy(rule);bad['people'][0]['components']['clothing']['ids']=[]
+        bad['people'][0]['components']['body']['ids']=['M01']
+        with self.assertRaisesRegex(ValueError,'no_usable_batch_component:clothing'):
+            sample_scene(bad,rules['seed'],0)
+
+        base=rules['scenes'][0]
+        unavailable=next(row['id'] for row in describe()['motions'] if row['status']!='ready')
+        failures=(('body',['missing_body'],'unknown_batch_component'),
+                  ('motion',['KIT11_walk','KIT11_walk'],'invalid_component_ids'),
+                  ('motion',[unavailable],'unavailable_batch_component'),
+                  ('motion',['APD6526'],'batch_component_filter_conflict'),
+                  ('clothing',['M03_KIT11_BEDLAM_transfer'],'batch_component_filter_conflict'))
+        for kind,ids,reason in failures:
+            bad=deepcopy(base)
+            bad['people'][0]['components'][kind]['ids']=ids
+            with self.assertRaisesRegex(ValueError,reason):sample_scene(bad,rules['seed'],0)
+        for kind,key,value,reason in (('body','default_versions_only','true','invalid_default_versions_only'),
+                                      ('clothing','kinds',[],'invalid_clothing_kinds'),
+                                      ('hair','ids','M01_groom','invalid_component_ids')):
+            bad=deepcopy(base)
+            bad['people'][0]['components'][kind][key]=value
+            with self.assertRaisesRegex(ValueError,reason):sample_scene(bad,rules['seed'],0)
+        old=deepcopy(base)
+        old['people'][0]['motion_behavior']='walk'
+        with self.assertRaisesRegex(ValueError,'invalid_batch_rule:person'):
+            sample_scene(old,rules['seed'],0)
+
+    def test_batch_cli_writes_only_scene_files(self):
+        rules=PROJECT_ROOT/'config/batch_rules.json'
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(batch,'PROJECT_ROOT',Path(tmp)), \
+                 patch('human_data_generator.composition.build',side_effect=AssertionError('built geometry')), \
+                 patch('subprocess.Popen',side_effect=AssertionError('started process')):
+                batch.main(['--rules',str(rules),'--name','sample'])
+            folder=Path(tmp)/'outputs/scenes/sample'
+            plan=json.loads((folder/'batch.json').read_text())
+            self.assertEqual(len(plan['scenes']),4)
+            self.assertTrue(all(Path(path).is_file() for path in plan['scenes']))
+            self.assertEqual(len(list(folder.glob('*.json'))),5)
+            old=Path(tmp)/'old_rules.json'
+            old.write_text(json.dumps({'schema':'human_batch_v1','seed':1,
+                                       'scenes':['city_single_walk']}))
+            with patch.object(batch,'PROJECT_ROOT',Path(tmp)):
+                with self.assertRaisesRegex(ValueError,'invalid_batch_rules'):
+                    batch.main(['--rules',str(old),'--name','old'])
+            self.assertFalse((Path(tmp)/'outputs/scenes/old').exists())
 
     def test_prepare_budget_and_mock_launch(self):
         scene=PROJECT_ROOT/'config/scene_example.json'

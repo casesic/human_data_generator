@@ -34,13 +34,24 @@ $GEN_PY -m human_data_generator.run run-prepared --name city_check --gpu-uuid GP
 
 `prepare` 不写预算截止时钟；`render` 和 `run-prepared` 在实际启动时设置截止时间，并拒绝已启动或已有结果的任务。生成成功后先检查相机产物并写 `observations.json`、`data_complete.json`。可选 `--video` 在数据完成后制作展示视频；视频失败保留数据包。已有但尚未导出的当前格式任务可执行 `$GEN_PY -m human_data_generator.run export --name <任务名>`，不复制 RGB/NPZ。旧 job/recipe/manifest 不由新入口解析。
 
-小批量规则采样只生成场景配置，不渲染：
+小批量规则采样只生成场景配置，不渲染。[config/batch_rules.json](config/batch_rules.json) 直接写每个场景的环境、帧率、帧数、相机组、每个人的四类组件候选及路线/速度/动作起点范围；不再通过模板名称查找 Python 中的隐藏规则。`route_start_xy_range_m` 和 `route_end_xy_range_m` 分别写成 `[[x最小值,x最大值],[y最小值,y最大值]]`，相同上下界表示固定值。`camera_jitter.xy_m` 和 `yaw_deg` 是相机位置与朝向的最大随机偏移；设为 0 即固定。复制一项 `scenes` 并换 `scene_id` 就能新增同类规则，旧模板名列表和旧 `motion_behavior` 字段均拒绝。
 
 ```bash
 $GEN_PY -m human_data_generator.batch --rules config/batch_rules.json --name key_batch_001
 ```
 
-输出中的每份场景 JSON 可再交给上述 `plan/prepare/render`。批量规则从可用身体、对应走路/骑行动作、普通绑定衣物和发型目录独立采样；锁定衣物不会被随机误配。同一规则、资源、总 seed 与场景编号得到同样配置；四类组件、轨迹、相机和渲染种子按用途派生。
+输出中的每份场景 JSON 可再交给上述 `plan/prepare/render`。每个人的 `components` 分别设身体 `default_versions_only`、动作 `behavior`（`walk`/`ride`）、衣物 `kinds`（`simple_barycentric`/`native_locked`）及各类 `ids`。`ids: []` 表示从满足其余条件的全部可用资源抽样；非空列表限定具体 ID，排序后抽样，列表换序不改变结果。显式未知、不可用、筛选冲突或锁定衣物与所选身体/动作/实际源帧不匹配会报错。生成的场景只含选定的四个 ID，不携带候选策略。同一规则、资源、总 seed 与场景编号得到同样配置；四类组件、轨迹、相机和渲染种子按用途派生。`city_crossing_pair` 当前规则给两人都选骑行动作，需要双人步行时把两人的 `components.motion.behavior` 改为 `walk` 并检查路线。
+
+例如，要明确选择非默认身体版本，可以把某个人的 `components` 改为：
+
+```json
+{"body":{"default_versions_only":false,"ids":["F04_v1"]},
+ "motion":{"behavior":"walk","ids":["KIT11_walk"]},
+ "clothing":{"kinds":["simple_barycentric"],"ids":["M03_simple"]},
+ "hair":{"ids":["M01_groom"]}}
+```
+
+要选现有锁定衣物，需同时指定 `body.ids: ["M03"]`、`motion.ids: ["KIT11_walk"]`、`motion.behavior: "walk"`、`clothing.kinds: ["native_locked"]`、`clothing.ids: ["M03_KIT11_BEDLAM_transfer"]`，并让 `motion_start` 与场景帧数落在该衣物的源帧窗口 `[0,120)` 内。检查使用目录中的实际资源与时间线，不构建几何缓存。
 
 编辑器将来也从本项目独立启动：
 
