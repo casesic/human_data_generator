@@ -1,39 +1,59 @@
-"""Sample explicit small-scene rules into scene files; never start rendering."""
+"""Sample variants of complete editor scenes; this module never builds or renders assets."""
 
 import argparse
+from copy import deepcopy
 import hashlib
 import json
 import math
 from pathlib import Path
 import random
+import re
 
 from human_data_generator.config import PROJECT_ROOT
 from human_data_generator.components import catalog, describe
 from human_data_generator.io.json_file import write_json
-from human_data_generator.runtime.scene import _asset_timeline, validate
+from human_data_generator.runtime.scene import _asset_timeline, validate, validate_scene
+
+SCHEMA = "human_batch_v4"
+COMPONENTS = {"body": "bodies", "motion": "motions", "clothing": "clothing", "hair": "hair"}
 
 
-def _rng(seed, index, purpose):
-    material = f"{seed}:{index}:{purpose}".encode()
+def _rng(seed, template_id, index, purpose):
+    material = f"{seed}:{template_id}:{index}:{purpose}".encode()
     return random.Random(int.from_bytes(hashlib.blake2b(material, digest_size=8).digest(), "big"))
 
 
-def _keys(value, expected, label):
-    if not isinstance(value, dict) or set(value) != set(expected):
-        raise ValueError("invalid_batch_rule:" + label)
+def _keys(value, required, optional=(), label="rule"):
+    if (
+        not isinstance(value, dict)
+        or not set(required) <= set(value)
+        or set(value) - set(required) - set(optional)
+    ):
+        raise ValueError(f"invalid_{label}_fields")
+
+
+def _number(value, label, *, integer=False):
+    if integer:
+        if type(value) is not int:
+            raise ValueError(f"invalid_{label}")
+    elif type(value) not in (int, float) or not math.isfinite(value):
+        raise ValueError(f"invalid_{label}")
+    return value
 
 
 def _range(value, label, *, integer=False):
     if not isinstance(value, list) or len(value) != 2:
-        raise ValueError("invalid_batch_range:" + label)
-    if integer:
-        if any(type(v) is not int for v in value):
-            raise ValueError("invalid_batch_range:" + label)
-    elif any(type(v) not in (int, float) or not math.isfinite(v) for v in value):
-        raise ValueError("invalid_batch_range:" + label)
-    if value[0] > value[1]:
-        raise ValueError("invalid_batch_range:" + label)
-    return value
+        raise ValueError(f"invalid_{label}_range")
+    low, high = (_number(v, label, integer=integer) for v in value)
+    if low > high:
+        raise ValueError(f"invalid_{label}_range")
+    return low, high
+
+
+def _xy_ranges(value, label):
+    if not isinstance(value, list) or len(value) != 2:
+        raise ValueError(f"invalid_{label}_xy")
+    return [_range(axis, label) for axis in value]
 
 
 def _sample(rng, value, label, *, integer=False):
@@ -41,56 +61,49 @@ def _sample(rng, value, label, *, integer=False):
     return rng.randint(low, high) if integer else rng.uniform(low, high)
 
 
-def _point(rng, value, label):
-    if not isinstance(value, list) or len(value) != 2:
-        raise ValueError("invalid_batch_point:" + label)
-    return [_sample(rng, value[axis], label) for axis in range(2)]
+def _sample_xy(rng, value, label):
+    return [rng.uniform(low, high) for low, high in _xy_ranges(value, label)]
 
 
-def _component_policy(value):
-    _keys(value, ("body", "motion", "clothing", "hair"), "components")
-    for kind, keys in (
-        ("body", ("default_versions_only", "ids")),
-        ("motion", ("behavior", "ids")),
-        ("clothing", ("kinds", "ids")),
-        ("hair", ("ids",)),
-    ):
-        _keys(value[kind], keys, "components." + kind)
-        ids = value[kind]["ids"]
-        if (
-            not isinstance(ids, list)
-            or any(not isinstance(ident, str) or not ident for ident in ids)
-            or len(ids) != len(set(ids))
-        ):
-            raise ValueError("invalid_component_ids:" + kind)
-    if type(value["body"]["default_versions_only"]) is not bool:
-        raise ValueError("invalid_default_versions_only")
-    if value["motion"]["behavior"] not in ("walk", "ride"):
-        raise ValueError("invalid_motion_behavior")
-    kinds = value["clothing"]["kinds"]
+def _component_policy(kind, value):
+    fields = {
+        "body": ("default_versions_only", "ids"),
+        "motion": ("behavior", "ids"),
+        "clothing": ("kinds", "ids"),
+        "hair": ("ids",),
+    }[kind]
+    _keys(value, fields, label=f"{kind}_candidate")
+    ids = value["ids"]
     if (
-        not isinstance(kinds, list)
-        or not kinds
-        or any(kind not in ("simple_barycentric", "native_locked") for kind in kinds)
-        or len(kinds) != len(set(kinds))
+        not isinstance(ids, list)
+        or any(not isinstance(i, str) or not i for i in ids)
+        or len(ids) != len(set(ids))
     ):
-        raise ValueError("invalid_clothing_kinds")
-    return value
+        raise ValueError(f"invalid_{kind}_ids")
+    if kind == "body" and type(value["default_versions_only"]) is not bool:
+        raise ValueError("invalid_default_versions_only")
+    if kind == "motion" and value["behavior"] not in ("walk", "ride"):
+        raise ValueError("invalid_motion_behavior")
+    if kind == "clothing":
+        kinds = value["kinds"]
+        if (
+            not isinstance(kinds, list)
+            or not kinds
+            or any(k not in ("simple_barycentric", "native_locked") for k in kinds)
+            or len(kinds) != len(set(kinds))
+        ):
+            raise ValueError("invalid_clothing_kinds")
 
 
-def _choose(
-    inventory, kind, policy, seed, index, person_id, *, body=None, motion=None, records=None
-):
-    catalog_kind = {"body": "bodies", "motion": "motions", "clothing": "clothing", "hair": "hair"}[
-        kind
-    ]
-    rows = {row["id"]: row for row in inventory[catalog_kind]}
+def _choose(inventory, kind, policy, rng, *, body=None, motion=None, records=None):
+    _component_policy(kind, policy)
+    rows = {row["id"]: row for row in inventory[COMPONENTS[kind]]}
     ids = policy["ids"]
     for ident in ids:
         if ident not in rows:
-            raise ValueError(f"unknown_batch_component:{kind}:{ident}")
+            raise ValueError(f"unknown_{kind}:{ident}")
         if rows[ident]["status"] != "ready":
-            raise ValueError(f'unavailable_batch_component:{kind}:{ident}:{rows[ident]["status"]}')
+            raise ValueError(f"unavailable_{kind}:{ident}:{rows[ident]['status']}")
 
     def allowed(row):
         if kind == "body":
@@ -117,178 +130,236 @@ def _choose(
             continue
         if not allowed(row):
             if ids:
-                reason = (
-                    "native_clothing_body_motion_or_window_conflict"
-                    if kind == "clothing"
-                    and row["kind"] == "native_locked"
-                    and row["kind"] in policy["kinds"]
-                    else "batch_component_filter_conflict"
-                )
-                raise ValueError(f"{reason}:{kind}:{ident}")
+                raise ValueError(f"{kind}_candidate_conflict:{ident}")
             continue
         candidates.append(ident)
     if not candidates:
-        raise ValueError("no_usable_batch_component:" + kind)
-    return _rng(seed, index, f"person_{person_id}_{kind}").choice(sorted(candidates))
+        raise ValueError(f"no_usable_{kind}_candidate")
+    return rng.choice(sorted(candidates))
 
 
-def sample_scene(rule, seed, index):
-    """Return one current-format scene from one fully specified sampling rule."""
-    if type(seed) is not int or seed < 1 or type(index) is not int or index < 0:
-        raise ValueError("invalid_batch_seed_or_index")
+def _template(template):
     _keys(
-        rule,
-        ("scene_id", "environment", "fps", "frame_count", "people", "rigs", "camera_jitter"),
-        "scene",
+        template,
+        ("template_id", "base_scene"),
+        ("route_offset_xy_m", "people", "rigs"),
+        "template",
     )
-    _keys(rule["camera_jitter"], ("xy_m", "yaw_deg"), "camera_jitter")
-    xy_jitter = rule["camera_jitter"]["xy_m"]
-    yaw_jitter = rule["camera_jitter"]["yaw_deg"]
-    if any(
-        type(v) not in (int, float) or not math.isfinite(v) or v < 0
-        for v in (xy_jitter, yaw_jitter)
-    ):
-        raise ValueError("invalid_camera_jitter")
-    found = catalog()
-    inventory = describe(found)
-    motions = found["motions"]
-
-    people = []
-    for spec in rule["people"]:
+    ident = template["template_id"]
+    if not isinstance(ident, str) or re.fullmatch(r"[a-z0-9_]{1,48}", ident) is None:
+        raise ValueError("invalid_template_id")
+    validate_scene(template["base_scene"])
+    people = template.get("people", [])
+    rigs = template.get("rigs", [])
+    if not isinstance(people, list) or not isinstance(rigs, list):
+        raise ValueError(f"{ident}:invalid_targets")
+    base_people = {p["person_id"] for p in template["base_scene"]["people"]}
+    base_rigs = {r["rig_id"] for r in template["base_scene"]["rigs"]}
+    seen_people, seen_rigs = set(), set()
+    if "route_offset_xy_m" in template:
+        try:
+            _xy_ranges(template["route_offset_xy_m"], "shared_route_offset")
+        except ValueError as error:
+            raise ValueError(f"{ident}:{error}") from error
+    for item in people:
         _keys(
-            spec,
-            (
-                "person_id",
-                "components",
-                "route_start_xy_range_m",
-                "route_end_xy_range_m",
-                "speed_m_s",
-                "start_progress_m",
-                "motion_start",
-            ),
-            "person",
+            item,
+            ("person_id",),
+            ("components", "speed_m_s", "motion_start", "start_progress_m", "route_offset_xy_m"),
+            "person_rule",
         )
-        pid = spec["person_id"]
-        if type(pid) is not int or pid < 1:
-            raise ValueError("invalid_batch_person")
-        policy = _component_policy(spec["components"])
-        body = _choose(inventory, "body", policy["body"], seed, index, pid)
-        motion = _choose(inventory, "motion", policy["motion"], seed, index, pid)
-        motion_start = _sample(
-            _rng(seed, index, f"person_{pid}_motion_start"),
-            spec["motion_start"],
-            "motion_start",
-            integer=True,
-        )
-        records = _asset_timeline(motions[motion], motion_start, rule["frame_count"], rule["fps"])
-        clothing = _choose(
-            inventory,
-            "clothing",
-            policy["clothing"],
-            seed,
-            index,
-            pid,
-            body=body,
-            motion=motion,
-            records=records,
-        )
-        hair = _choose(inventory, "hair", policy["hair"], seed, index, pid)
-        route_rng = _rng(seed, index, f"person_{pid}_route")
-        people.append(
-            dict(
-                person_id=pid,
-                body=body,
-                motion=motion,
-                clothing=clothing,
-                hair=hair,
-                motion_start=motion_start,
-                route_xy_m=[
-                    _point(route_rng, spec["route_start_xy_range_m"], "route_start"),
-                    _point(route_rng, spec["route_end_xy_range_m"], "route_end"),
-                ],
-                speed_m_s=_sample(
-                    _rng(seed, index, f"person_{pid}_speed"), spec["speed_m_s"], "speed_m_s"
-                ),
-                start_progress_m=_sample(
-                    _rng(seed, index, f"person_{pid}_progress"),
-                    spec["start_progress_m"],
-                    "start_progress_m",
-                ),
-            )
-        )
+        pid = item["person_id"]
+        if type(pid) is not int or pid not in base_people or pid in seen_people:
+            raise ValueError(f"{ident}:invalid_person_rule:{pid}")
+        seen_people.add(pid)
+        if "components" in item:
+            policies = item["components"]
+            if not isinstance(policies, dict) or not policies or set(policies) - set(COMPONENTS):
+                raise ValueError(f"{ident}:person_{pid}:invalid_components")
+            for kind, policy in policies.items():
+                try:
+                    _component_policy(kind, policy)
+                except ValueError as error:
+                    raise ValueError(f"{ident}:person_{pid}:{error}") from error
+        for field in ("speed_m_s", "motion_start", "start_progress_m"):
+            if field in item:
+                try:
+                    _range(item[field], field, integer=field == "motion_start")
+                except ValueError as error:
+                    raise ValueError(f"{ident}:person_{pid}:{error}") from error
+        if "route_offset_xy_m" in item:
+            try:
+                _xy_ranges(item["route_offset_xy_m"], "person_route_offset")
+            except ValueError as error:
+                raise ValueError(f"{ident}:person_{pid}:{error}") from error
+    for item in rigs:
+        _keys(item, ("rig_id",), ("offset_xy_m", "offset_yaw_deg"), "rig_rule")
+        rid = item["rig_id"]
+        if not isinstance(rid, str) or rid not in base_rigs or rid in seen_rigs:
+            raise ValueError(f"{ident}:invalid_rig_rule:{rid}")
+        seen_rigs.add(rid)
+        if "offset_xy_m" in item:
+            try:
+                _xy_ranges(item["offset_xy_m"], "rig_offset")
+            except ValueError as error:
+                raise ValueError(f"{ident}:{rid}:{error}") from error
+        if "offset_yaw_deg" in item:
+            try:
+                _range(item["offset_yaw_deg"], "rig_yaw_offset")
+            except ValueError as error:
+                raise ValueError(f"{ident}:{rid}:{error}") from error
 
-    rigs = []
-    for rig in rule["rigs"]:
-        _keys(rig, ("rig_id", "origin_m", "yaw_deg"), "rig")
-        if (
-            not isinstance(rig["origin_m"], list)
-            or len(rig["origin_m"]) != 3
-            or any(
-                type(v) not in (int, float) or not math.isfinite(v)
-                for v in (*rig["origin_m"], rig["yaw_deg"])
-            )
-        ):
-            raise ValueError("invalid_batch_rig")
-        camera_rng = _rng(seed, index, "camera_" + str(rig["rig_id"]))
-        rigs.append(
-            dict(
-                rig_id=rig["rig_id"],
-                origin_m=[
-                    rig["origin_m"][0] + camera_rng.uniform(-xy_jitter, xy_jitter),
-                    rig["origin_m"][1] + camera_rng.uniform(-xy_jitter, xy_jitter),
-                    rig["origin_m"][2],
-                ],
-                yaw_deg=rig["yaw_deg"] + camera_rng.uniform(-yaw_jitter, yaw_jitter),
-            )
-        )
 
-    scene = dict(
-        schema="human_scene_v2",
-        scene_id=f"batch_{index:03d}_{rule['scene_id']}",
-        environment=rule["environment"],
-        seed=_rng(seed, index, "render").randrange(1, 2**31),
-        fps=rule["fps"],
-        frame_count=rule["frame_count"],
-        people=people,
-        rigs=rigs,
+def sample_scene(template, seed, index, inventory=None, motions=None):
+    """Return one deterministic scene; never mutate the embedded base scene."""
+    _number(seed, "seed", integer=True)
+    if seed < 1 or type(index) is not int or index < 0:
+        raise ValueError("invalid_seed_or_index")
+    _template(template)
+    ident = template["template_id"]
+    inventory = describe() if inventory is None else inventory
+    motions = catalog()["motions"] if motions is None else motions
+    scene = deepcopy(template["base_scene"])
+    scene["scene_id"] = f"batch_{ident}_v{index + 1:04d}"
+    scene["seed"] = _rng(seed, ident, index, "render").randrange(1, 2**31)
+    shared = (
+        _sample_xy(
+            _rng(seed, ident, index, "shared_route"),
+            template["route_offset_xy_m"],
+            "shared_route_offset",
+        )
+        if "route_offset_xy_m" in template
+        else [0, 0]
     )
+    person_rules = {p["person_id"]: p for p in template.get("people", [])}
+    for person in scene["people"]:
+        pid = person["person_id"]
+        spec = person_rules.get(pid, {})
+        policies = spec.get("components", {})
+        try:
+            for kind in ("body", "motion"):
+                if kind in policies:
+                    person[kind] = _choose(
+                        inventory,
+                        kind,
+                        policies[kind],
+                        _rng(seed, ident, index, f"person_{pid}_{kind}"),
+                    )
+            for field in ("motion_start", "speed_m_s", "start_progress_m"):
+                if field in spec:
+                    person[field] = _sample(
+                        _rng(seed, ident, index, f"person_{pid}_{field}"),
+                        spec[field],
+                        field,
+                        integer=field == "motion_start",
+                    )
+            if "clothing" in policies:
+                records = _asset_timeline(
+                    motions[person["motion"]],
+                    person["motion_start"],
+                    scene["frame_count"],
+                    scene["fps"],
+                )
+                person["clothing"] = _choose(
+                    inventory,
+                    "clothing",
+                    policies["clothing"],
+                    _rng(seed, ident, index, f"person_{pid}_clothing"),
+                    body=person["body"],
+                    motion=person["motion"],
+                    records=records,
+                )
+            if "hair" in policies:
+                person["hair"] = _choose(
+                    inventory,
+                    "hair",
+                    policies["hair"],
+                    _rng(seed, ident, index, f"person_{pid}_hair"),
+                )
+            personal = (
+                _sample_xy(
+                    _rng(seed, ident, index, f"person_{pid}_route"),
+                    spec["route_offset_xy_m"],
+                    "person_route_offset",
+                )
+                if "route_offset_xy_m" in spec
+                else [0, 0]
+            )
+            person["route_xy_m"] = [
+                [x + shared[0] + personal[0], y + shared[1] + personal[1]]
+                for x, y in person["route_xy_m"]
+            ]
+        except (ValueError, KeyError) as error:
+            raise ValueError(f"{ident}:person_{pid}:{error}") from error
+    rig_rules = {r["rig_id"]: r for r in template.get("rigs", [])}
+    for rig in scene["rigs"]:
+        rid = rig["rig_id"]
+        spec = rig_rules.get(rid, {})
+        if "offset_xy_m" in spec:
+            dx, dy = _sample_xy(
+                _rng(seed, ident, index, f"rig_{rid}_xy"), spec["offset_xy_m"], "rig_offset"
+            )
+            rig["origin_m"][0] += dx
+            rig["origin_m"][1] += dy
+        if "offset_yaw_deg" in spec:
+            rig["yaw_deg"] += _sample(
+                _rng(seed, ident, index, f"rig_{rid}_yaw"), spec["offset_yaw_deg"], "rig_yaw_offset"
+            )
     check = validate(scene)
     if check["status"] != "passed":
-        raise ValueError(check["errors"])
+        raise ValueError(f"{ident}:variant_{index + 1}:{check['errors']}")
     return scene
+
+
+def sample_batch(rules, count):
+    """Draw count scenes from each template; count belongs to this invocation."""
+    _keys(rules, ("schema", "seed", "templates"), label="batch_rules")
+    if (
+        rules["schema"] != SCHEMA
+        or type(rules["seed"]) is not int
+        or rules["seed"] < 1
+        or not isinstance(rules["templates"], list)
+        or not rules["templates"]
+    ):
+        raise ValueError("invalid_batch_rules")
+    if type(count) is not int or count < 1:
+        raise ValueError("invalid_batch_count")
+    templates = rules["templates"]
+    for template in templates:
+        _template(template)
+    ids = [t["template_id"] for t in templates]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate_template_id")
+    found = catalog()
+    inventory = describe(found)
+    scenes = []
+    for template in templates:
+        for index in range(count):
+            scenes.append(sample_scene(template, rules["seed"], index, inventory, found["motions"]))
+    return scenes
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Sample scene JSON files; no geometry build or rendering."
+        description="Sample editor scene variants; no geometry or rendering."
     )
     parser.add_argument("--rules", type=Path, required=True)
     parser.add_argument("--name", required=True)
+    parser.add_argument("--count", type=int, required=True, help="number of scenes per template")
     args = parser.parse_args(argv)
+    if re.fullmatch(r"[a-z0-9_-]{1,64}", args.name) is None:
+        parser.error("invalid_batch_name")
     rules = json.loads(args.rules.read_text())
-    _keys(rules, ("schema", "seed", "scenes"), "root")
-    if (
-        rules["schema"] != "human_batch_v2"
-        or not isinstance(rules["scenes"], list)
-        or not rules["scenes"]
-    ):
-        raise ValueError("invalid_batch_rules")
     output = PROJECT_ROOT / "outputs/scenes" / args.name
     if output.exists():
         raise FileExistsError(output)
-    # Validate and sample every rule before creating an output directory.
-    scenes = [
-        sample_scene(rule, rules["seed"], index) for index, rule in enumerate(rules["scenes"])
-    ]
+    scenes = sample_batch(rules, args.count)
     output.mkdir(parents=True)
     paths = []
     for scene in scenes:
         path = output / f"{scene['scene_id']}.json"
         write_json(path, scene)
         paths.append(str(path))
-    write_json(
-        output / "batch.json", dict(schema="human_batch_plan_v1", seed=rules["seed"], scenes=paths)
-    )
     print(json.dumps(dict(output=str(output), scenes=paths), ensure_ascii=False))
 
 

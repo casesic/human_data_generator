@@ -19,6 +19,13 @@ def mask_native_support(mask, roi, full_size_wh):
     x, y, w, h = cv2.boundingRect(mask)
     if w == 0 or h == 0:
         return None
+    periodic_x = roi[0] == 0 and roi[2] == full[0]
+    if periodic_x:
+        columns = np.flatnonzero(np.any(mask > 0, axis=0))
+        gaps = np.diff(np.r_[columns, columns[0] + full[0]])
+        start = int(columns[(int(np.argmax(gaps)) + 1) % len(columns)])
+        end = int(((columns - start) % full[0]).max()) + start
+        x, w = start, end - start + 1
     if w == 1 or h == 1:
         raise ValueError("degenerate_person_mask_box")
     box = np.array(
@@ -40,8 +47,10 @@ def mask_native_support(mask, roi, full_size_wh):
     if (
         np.any(roi[:2] < 0)
         or np.any(roi[2:] > full)
-        or np.any(rect[:2] < roi[:2])
-        or np.any(rect[2:] > roi[2:])
+        or rect[1] < roi[1]
+        or rect[3] > roi[3]
+        or (periodic_x and rect[2] - rect[0] > full[0])
+        or (not periodic_x and (rect[0] < roi[0] or rect[2] > roi[2]))
     ):
         raise ValueError("crop_filter_support_outside_roi")
     return dict(
@@ -50,5 +59,5 @@ def mask_native_support(mask, roi, full_size_wh):
         gaussian_sigma=float(sigma),
         filter_margin_px=margin,
         source_sampling_supported=True,
-        crop_policy_version="mask_bbox_inclusive_v1",
+        crop_policy_version="mask_bbox_periodic_v2" if periodic_x else "mask_bbox_inclusive_v1",
     )

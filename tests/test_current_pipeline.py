@@ -17,23 +17,26 @@ import numpy as np
 from PIL import Image
 
 from human_data_generator import batch
-from human_data_generator.batch import sample_scene
+from human_data_generator.batch import sample_scene, sample_batch
 from human_data_generator.components import describe,select
 from human_data_generator.composition import build,_cached,_key
 from human_data_generator.config import PROJECT_ROOT
 from human_data_generator.editor.core import default_scene
 from human_data_generator.editor import server
+from human_data_generator.camera.rig import rig_poses
 from human_data_generator.consumer import consume_camera_arrays, load_rig_context
 from human_data_generator.data.mamma_export import export_existing
 from human_data_generator.data.mamma_crop import mask_native_support
 from human_data_generator.run import render_prepared
 from human_data_generator import run
-from human_data_generator.runtime.multirig_prepare import prepare
-from human_data_generator.runtime.scene import compile_scene,validate_scene
+from human_data_generator.runtime.multirig_prepare import prepare, _surface_may_enter_valid_mask
+from human_data_generator.runtime.scene import compile_scene, route_positions, validate, validate_scene
 from human_data_generator.runtime.scene import _curve
 from human_data_generator.runtime.task_paths import run_config, task_path
 from human_data_generator.runtime.frame_consumer import serve_frames
 from human_data_generator.imaging.output_modes import prepare_source_workspace, cleanup_owned_source
+from human_data_generator.imaging.roi_planning import plan_native_crop_region
+from human_data_generator.data.occlusion_events import point_occlusion_evidence
 
 
 def put(path,value):
@@ -94,6 +97,58 @@ def synthetic_bundle(root, *, frames=(0,), rigs=(('rig_alpha',True),('rig_beta',
 
 
 class CurrentPipelineTest(unittest.TestCase):
+    def test_periodic_seam_roi_crop_and_visibility_neighbors(self):
+        normal = plan_native_crop_region(
+            {"body": np.array([[100., 110.], [120., 130.]])}, (256, 256)
+        )
+        self.assertEqual(normal["roi_xyxy"], [54, 64, 166, 176])
+        xy = np.array([[250., 110.], [3., 112.], [6., 134.], [247., 131.]])
+        region = plan_native_crop_region({"body": xy}, (256, 256))
+        self.assertEqual(region["roi_xyxy"][0::2], [0, 256])
+        mask = np.zeros((256, 256), np.uint8)
+        mask[110:135, 247:] = 255
+        mask[110:135, :7] = 255
+        support = mask_native_support(mask, [0, 0, 256, 256], [256, 256])
+        self.assertEqual(support["crop_policy_version"], "mask_bbox_periodic_v2")
+        self.assertEqual(support["box_xyxy"], [247, 110, 262, 134])
+        self.assertLess(support["sampling_rect_erp"][2] - support["sampling_rect_erp"][0], 256)
+        depth = np.ones((64, 64), np.float32)
+        instance = np.ones((64, 64), np.float32)
+        evidence = point_occlusion_evidence(
+            np.array([[0.2, 20.], [63.2, 20.]]), np.array([1.1, 1.1]),
+            np.array([False, False]), np.array([True, True]),
+            np.array([2, 2]), [1, 2], depth, instance, strict_coverage=False
+        )
+        self.assertTrue(evidence["evidence_neighborhood_complete"].all())
+
+        valid = np.zeros((64, 64), bool)
+        valid[29:32, 29:32] = True
+        vertices = np.array([[10., 10.], [50., 10.], [30., 50.]])
+        self.assertTrue(_surface_may_enter_valid_mask(
+            vertices, np.array([[0, 1, 2]]), valid
+        ))
+        self.assertFalse(_surface_may_enter_valid_mask(
+            vertices + 70, np.array([[0, 1, 2]]), valid
+        ))
+
+    def test_shared_gpu_check_keeps_uuid_validation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            blender = Path(temp) / 'blender'
+            blender.touch()
+            snapshots = [
+                'index, uuid, memory.used [MiB], memory.free [MiB], utilization.gpu [%]\n'
+                '1, GPU-BUSY, 14000 MiB, 10000 MiB, 75 %\n',
+                'gpu_uuid, pid, process_name, used_gpu_memory [MiB]\n'
+                'GPU-BUSY, 123, python, 4000 MiB\n',
+            ]
+            with patch('human_data_generator.run.resource_path', return_value=blender), \
+                 patch('human_data_generator.run.subprocess.check_output', side_effect=snapshots):
+                self.assertEqual(run._check_gpu('GPU-BUSY')['selected_index'], 1)
+            with patch('human_data_generator.run.resource_path', return_value=blender), \
+                 patch('human_data_generator.run.subprocess.check_output', side_effect=snapshots):
+                with self.assertRaisesRegex(RuntimeError, 'selected_GPU_unavailable'):
+                    run._check_gpu('GPU-MISSING')
+
     def test_components_and_short_real_build(self):
         inventory=describe()
         self.assertEqual({k:v['ready'] for k,v in inventory['counts'].items()},
@@ -183,131 +238,266 @@ class CurrentPipelineTest(unittest.TestCase):
                 self.assertTrue(Path(saved['path']).is_file())
                 self.assertEqual(json.loads(Path(saved['path']).read_text())['people'][0]['hair'],'M01_groom')
 
+    def test_editor_timeline_uses_generation_route_and_clock(self):
+        scene = default_scene('city')
+        scene['fps'] = 8
+        scene['frame_count'] = 6
+        scene['people'][0].update(person_id=7, route_xy_m=[[0, 77.96], [2, 84], [0, 92]],
+                                  start_progress_m=1.0, speed_m_s=1.5)
+        second = deepcopy(scene['people'][0])
+        second['person_id'] = 13
+        second['route_xy_m'] = [[x + 2, y] for x, y in second['route_xy_m']]
+        scene['people'].append(second)
+        handler = server.Handler.__new__(server.Handler)
+        handler.path = '/api/trajectory'
+        handler.wfile = BytesIO()
+        handler.send_response = lambda code: None
+        handler.send_header = lambda *args: None
+        handler.end_headers = lambda: None
+        handler._body = lambda: {'scene': scene}
+        handler.do_POST()
+        positions = json.loads(handler.wfile.getvalue())
+        self.assertEqual(set(positions['people']), {'7', '13'})
+        self.assertEqual(positions['fps'], 8)
+        self.assertEqual(len(positions['people']['7']), 6)
+        for frame in (0, 3, 5):
+            expected, direction = _curve(scene['people'][0]['route_xy_m'], 1.0 + 1.5 * frame / 8)
+            np.testing.assert_allclose(positions['people']['7'][frame]['xy'], expected, atol=1e-10)
+            np.testing.assert_allclose(positions['people']['7'][frame]['direction'], direction,
+                                       atol=1e-10)
+            np.testing.assert_allclose(positions['people']['13'][frame]['xy'], expected + [2, 0],
+                                       atol=1e-10)
+        self.assertGreater(np.linalg.norm(np.array(positions['people']['7'][5]['xy']) -
+                                           positions['people']['7'][0]['xy']), 0.5)
+        third = deepcopy(scene['people'][0])
+        third['person_id'] = 21
+        third['start_progress_m'] = 999
+        scene['people'].append(third)
+        handler.wfile = BytesIO()
+        handler.do_POST()
+        partial = json.loads(handler.wfile.getvalue())
+        self.assertEqual(set(partial['people']), {'7', '13'})
+        self.assertIn('person_21:frame_0:route_time_out_of_bounds', partial['errors']['21'])
+        third['start_progress_m'] = 0
+        third['route_xy_m'] = [[0, 78], [0, 78.4]]
+        handler.wfile = BytesIO()
+        handler.do_POST()
+        partial = json.loads(handler.wfile.getvalue())
+        self.assertEqual(set(partial['people']), {'7', '13', '21'})
+        self.assertEqual(len(partial['people']['21']), 3)
+        self.assertIn('person_21:frame_3:route_time_out_of_bounds', partial['errors']['21'])
+        scene['people'].pop()
+        scene['people'][0]['start_progress_m'] = 999
+        handler.wfile = BytesIO()
+        handler.do_POST()
+        partial = json.loads(handler.wfile.getvalue())
+        self.assertEqual(set(partial['people']), {'13'})
+        self.assertIn('person_7:frame_0:route_time_out_of_bounds', partial['errors']['7'])
+        with self.assertRaisesRegex(ValueError, 'person_7:frame_0:route_time_out_of_bounds'):
+            route_positions(scene)
+
+    def test_editor_camera_arrow_convention_matches_physical_lenses(self):
+        for yaw_deg in (0, 90, 298):
+            _, lenses, _ = rig_poses([0, 0, 0], yaw_deg, 0.18)
+            angle = np.deg2rad(yaw_deg)
+            cam2_axis = np.array([-np.sin(angle), np.cos(angle), 0])
+            np.testing.assert_allclose(lenses['cam2'][:3, 2], cam2_axis, atol=1e-12)
+            np.testing.assert_allclose(lenses['cam4'][:3, 2], -cam2_axis, atol=1e-12)
+
+    def test_overlapping_people_and_camera_colocation_allowed_but_road_checked(self):
+        scene = default_scene('city')
+        second = deepcopy(scene['people'][0])
+        second['person_id'] = 2
+        scene['people'].append(second)
+        scene['rigs'][0]['origin_m'][:2] = scene['people'][0]['route_xy_m'][0]
+        self.assertEqual(validate(scene)['status'], 'passed')
+        template = {'template_id': 'overlap', 'base_scene': scene}
+        self.assertEqual([p['person_id'] for p in sample_scene(template, scene['seed'], 0)['people']],
+                         [1, 2])
+
+        off_road = deepcopy(scene)
+        off_road['people'][1]['route_xy_m'] = [[x + 10, y] for x, y in second['route_xy_m']]
+        self.assertTrue(any('outside_verified_road' in error for error in
+                            validate(off_road, frames=[0])['errors']))
+
+    def test_editor_rules_export_batch_and_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            def request(path,body=None):
+                handler=server.Handler.__new__(server.Handler)
+                handler.path=path;handler.wfile=BytesIO()
+                handler.send_response=lambda code:None
+                handler.send_header=lambda *args:None
+                handler.end_headers=lambda:None
+                if body is None:handler.do_GET()
+                else:
+                    handler._body=lambda:body
+                    handler.do_POST()
+                return json.loads(handler.wfile.getvalue())
+            scene=default_scene('city');scene['frame_count']=2
+            scene['people'][0]['route_xy_m'].insert(1,[0,82])
+            other=deepcopy(scene['people'][0]);other['person_id']=7
+            other['route_xy_m']=[[x+1.3,y] for x,y in other['route_xy_m']]
+            scene['people'].append(other)
+            rig=deepcopy(scene['rigs'][0]);rig['rig_id']='rig_other';rig['origin_m'][0]+=.4
+            scene['rigs'].append(rig)
+            rules=dict(schema='human_batch_v4',seed=47,templates=[
+                dict(template_id='pair',base_scene=scene,
+                     people=[dict(person_id=7,speed_m_s=[1.1,1.2])],
+                     rigs=[dict(rig_id='rig_other',offset_yaw_deg=[0,1])])])
+            with patch.object(server,'RULES',root/'rules'), \
+                 patch.object(server,'RECIPES',root/'recipes'), \
+                 patch.object(batch,'PROJECT_ROOT',root), \
+                 patch('subprocess.Popen',side_effect=AssertionError('started process')):
+                saved=request('/api/save',{'scene':scene})
+                self.assertEqual(request('/api/recipes')['names'],[saved['id']])
+                preview=request('/api/try-rules',{'rules':rules})['scenes']
+                self.assertEqual(len(preview),2)
+                self.assertEqual(sample_batch(rules,3)[:2],preview)
+                exported=request('/api/export-rules',{'name':'pair-rules','rules':rules})
+                self.assertTrue(Path(exported['path']).is_file())
+                loaded=request('/api/rule?name=pair-rules')
+                self.assertEqual(loaded,rules)
+                self.assertNotIn('count',loaded['templates'][0])
+                self.assertIn('--count 10',exported['command'])
+                self.assertIn('--name pair-rules',exported['command'])
+                self.assertEqual(request('/api/rules')['names'],['pair-rules'])
+                put(root/'rules/old.json',dict(schema='human_batch_v3',seed=47,templates=[]))
+                self.assertEqual(request('/api/rules')['names'],['pair-rules'])
+                self.assertEqual(request('/api/try-rules',{'rules':loaded})['scenes'],preview)
+                duplicate=request('/api/export-rules',{'name':'pair-rules','rules':rules})
+                self.assertIn('File exists',duplicate['error'])
+                batch.main(['--rules',exported['path'],'--name','pair-sample','--count','2'])
+                paths=sorted((root/'outputs/scenes/pair-sample').glob('*.json'))
+                self.assertEqual(len(paths),2)
+                self.assertEqual(json.loads(paths[0].read_text()),preview[0])
+                with patch('sys.stdout',new_callable=StringIO) as stdout:
+                    run.main(['plan','--scene',str(paths[0])])
+                self.assertEqual(json.loads(stdout.getvalue())['camera_calls'],8)
+                multi=deepcopy(rules)
+                second=deepcopy(multi['templates'][0]);second['template_id']='second'
+                second['base_scene']['scene_id']='second_base'
+                multi['templates'].append(second)
+                self.assertEqual(len(request('/api/try-rules',{'rules':multi})['scenes']),4)
+                self.assertEqual(len(request('/api/export-rules',{'name':'multi','rules':multi}).get('error','')),0)
+                self.assertEqual(len(request('/api/rule?name=multi')['templates']),2)
+
     def test_scene_sampling_and_clock(self):
+        too_long=default_scene('city');too_long['frame_count']=26
+        self.assertIn('person_1:APD6526:motion_exceeds_cache:required_s=3.125',
+                      validate(too_long)['errors'][0])
         rules=json.loads((PROJECT_ROOT/'config/batch_rules.json').read_text())
-        self.assertEqual(len(rules['scenes']),4)
-        for i,item in enumerate(rules['scenes']):
-            self.assertEqual(sample_scene(item,rules['seed'],i)['schema'],'human_scene_v2')
-        rule=rules['scenes'][2]
-        a=sample_scene(rule,rules['seed'],2)
-        b=sample_scene(rule,rules['seed'],2)
-        self.assertEqual(a,b)
-        self.assertTrue(all(k in a['people'][0] for k in ('body','motion','clothing','hair')))
-        custom=deepcopy(rule)
-        custom['scene_id']='custom_pair'
-        custom['people'][0]['speed_m_s']=[1.05,1.05]
-        custom['people'][0]['route_start_xy_range_m'][0]=[-1.2,-1.2]
-        changed=sample_scene(custom,rules['seed'],2)
-        self.assertEqual(changed['scene_id'],'batch_002_custom_pair')
-        self.assertEqual(changed['people'][0]['speed_m_s'],1.05)
-        self.assertEqual(changed['people'][0]['route_xy_m'][0][0],-1.2)
-        with self.assertRaises(ValueError):sample_scene('city_crossing_pair',rules['seed'],2)
-        inventory=describe()
-        self.assertGreaterEqual(inventory['counts']['bodies']['ready'],10)
-        a=default_scene('city');a['frame_count']=2
-        second=dict(a['people'][0],person_id=17,route_xy_m=[[1.5,77.96],[1.5,92]])
-        a['people'].append(second)
-        validate_scene(a)
-        people,times,matrices=compile_scene(a,[0,1])
-        self.assertEqual([p['person_id'] for p in people],[1,17])
-        self.assertEqual(matrices.shape,(2,2,4,4))
-        self.assertEqual(len(times['17']),2)
-        self.assertEqual(people[0]['asset_id'],people[1]['asset_id'])
-        a['people'][1]['body']='M03'
-        shared_motion=compile_scene(a,[0])[0]
-        self.assertEqual(shared_motion[0]['component_ids']['motion'],shared_motion[1]['component_ids']['motion'])
-        self.assertNotEqual(shared_motion[0]['asset_id'],shared_motion[1]['asset_id'])
-        a['people'].reverse()
-        self.assertEqual([p['person_id'] for p in compile_scene(a,[0])[0]],[17,1])
-        a['frame_count']=999
-        with self.assertRaises(ValueError):validate_scene(a)
-        a['frame_count']=2
-        a['people'][0]['asset']='unsupported'
-        with self.assertRaisesRegex(ValueError,'person_fields'):validate_scene(a)
-        a['people'][0].pop('asset')
-        a['qualification_registry']='unsupported'
-        with self.assertRaisesRegex(ValueError,'scene_fields'):validate_scene(a)
+        self.assertEqual(rules['schema'],'human_batch_v4')
+        self.assertEqual(len(rules['templates']),4)
+        self.assertEqual(len(sample_batch(rules,1)),4)
+        self.assertEqual(len(sample_batch(rules,2)),8)
+        template=deepcopy(rules['templates'][2])
+        template['base_scene']['people'][0]['route_xy_m'].insert(1,[-1.4,84])
+        second=deepcopy(template['base_scene']['rigs'][0]);second['rig_id']='rig_other'
+        second['origin_m'][0]+=.3
+        template['base_scene']['rigs'].append(second)
+        template.pop('route_offset_xy_m')
+        template.pop('people')
+        template.pop('rigs')
+        frozen=deepcopy(template)
+        scene=sample_scene(template,rules['seed'],0)
+        self.assertEqual(template,frozen)
+        self.assertEqual(len(scene['people'][0]['route_xy_m']),3)
+        self.assertEqual(scene['people'][0]['route_xy_m'],frozen['base_scene']['people'][0]['route_xy_m'])
+        self.assertEqual(scene['rigs'],frozen['base_scene']['rigs'])
+        self.assertEqual([p['person_id'] for p in scene['people']],[1,2])
+        expected=deepcopy(frozen['base_scene'])
+        expected['scene_id']=scene['scene_id'];expected['seed']=scene['seed']
+        self.assertEqual(scene,expected)
+        self.assertEqual(scene,sample_scene(template,rules['seed'],0))
+        with self.assertRaises(ValueError):sample_batch({'schema':'human_batch_v2','seed':1,'scenes':[]},1)
+        with self.assertRaisesRegex(ValueError,'invalid_batch_count'):sample_batch(rules,0)
+        with self.assertRaisesRegex(ValueError,'invalid_template_fields'):
+            sample_batch(dict(rules,templates=[dict(rules['templates'][0],count=2)]),1)
+        validate_scene(scene)
+        people,times,matrices=compile_scene(scene,[0,1])
+        self.assertEqual([p['person_id'] for p in people],[1,2])
+        self.assertEqual(matrices.shape,(16,2,4,4))
+        self.assertEqual(len(times['2']),16)
 
-    def test_batch_component_candidate_pools(self):
+    def test_batch_offsets_and_candidates(self):
         rules=json.loads((PROJECT_ROOT/'config/batch_rules.json').read_text())
-        rule=deepcopy(rules['scenes'][0]);pool=rule['people'][0]['components']
-        pool['body']['ids']=['M03','M01']
-        pool['motion']['ids']=['KIT425_walk','KIT11_walk']
-        pool['clothing']['ids']=['M03_simple','M01_simple']
-        pool['hair']['ids']=['M03_groom','M01_groom']
-        chosen=sample_scene(rule,rules['seed'],0)
-        self.assertIn(chosen['people'][0]['body'],pool['body']['ids'])
-        self.assertIn(chosen['people'][0]['motion'],pool['motion']['ids'])
-        self.assertIn(chosen['people'][0]['clothing'],pool['clothing']['ids'])
-        self.assertIn(chosen['people'][0]['hair'],pool['hair']['ids'])
-        reordered=deepcopy(rule)
-        for item in reordered['people'][0]['components'].values():item['ids'].reverse()
-        self.assertEqual(chosen,sample_scene(reordered,rules['seed'],0))
-
-        fixed=deepcopy(rule);pool=fixed['people'][0]['components']
-        pool['body']={'default_versions_only':False,'ids':['F04_v1']}
-        pool['motion']['ids']=['KIT11_walk']
-        pool['clothing']['ids']=['M03_simple']
-        pool['hair']['ids']=['M01_groom']
-        person=sample_scene(fixed,rules['seed'],0)['people'][0]
-        self.assertEqual((person['body'],person['motion'],person['clothing'],person['hair']),
-                         ('F04_v1','KIT11_walk','M03_simple','M01_groom'))
-        pool['body']['default_versions_only']=True
-        with self.assertRaisesRegex(ValueError,'batch_component_filter_conflict'):
-            sample_scene(fixed,rules['seed'],0)
-
-        pair=deepcopy(rules['scenes'][2])
-        for spec,ident in zip(pair['people'],('M01','M03')):
-            spec['components']['body']['ids']=[ident]
-        self.assertEqual([p['body'] for p in sample_scene(pair,rules['seed'],2)['people']],
-                         ['M01','M03'])
+        template=deepcopy(rules['templates'][2])
+        template['base_scene']['people'][0]['route_xy_m'].insert(1,[-1.4,84])
+        template['route_offset_xy_m']=[[.1,.1],[.2,.2]]
+        template['people'][0]['route_offset_xy_m']=[[.3,.3],[0,0]]
+        template['rigs'][0]['offset_xy_m']=[[.5,.5],[0,0]]
+        template['rigs'][0]['offset_yaw_deg']=[2,2]
+        untouched_rig=deepcopy(template['base_scene']['rigs'][0]);untouched_rig['rig_id']='rig_other'
+        untouched_rig['origin_m'][0]+=.2
+        template['base_scene']['rigs'].append(untouched_rig)
+        base=deepcopy(template['base_scene'])
+        scene=sample_scene(template,rules['seed'],0)
+        for original,shifted in zip(base['people'][0]['route_xy_m'],scene['people'][0]['route_xy_m']):
+            np.testing.assert_allclose(np.array(shifted)-original,[.4,.2])
+        for original,shifted in zip(base['people'][1]['route_xy_m'],scene['people'][1]['route_xy_m']):
+            np.testing.assert_allclose(np.array(shifted)-original,[.1,.2])
+        self.assertAlmostEqual(scene['rigs'][0]['origin_m'][0]-base['rigs'][0]['origin_m'][0],.5)
+        self.assertAlmostEqual(scene['rigs'][0]['yaw_deg']-base['rigs'][0]['yaw_deg'],2)
+        self.assertEqual(scene['rigs'][1],base['rigs'][1])
+        policy=template['people'][0]['components']
+        policy['body']={'default_versions_only':False,'ids':['F04_v1']}
+        policy['motion']={'behavior':'ride','ids':['APD6526']}
+        policy['clothing']={'kinds':['simple_barycentric'],'ids':['M03_simple']}
+        policy['hair']={'ids':['M01_groom']}
+        selected=sample_scene(template,rules['seed'],0)['people'][0]
+        self.assertEqual((selected['body'],selected['motion'],selected['clothing'],selected['hair']),
+                         ('F04_v1','APD6526','M03_simple','M01_groom'))
+        reordered=deepcopy(template)
+        reordered['people'][0]['components']['hair']['ids']=['M03_groom','M01_groom']
+        normal=sample_scene(reordered,rules['seed'],0)
+        reordered['people'][0]['components']['hair']['ids'].reverse()
+        self.assertEqual(normal,sample_scene(reordered,rules['seed'],0))
+        by_id={item['scene_id']:item for item in sample_batch(rules,1)}
+        rules['templates'].reverse()
+        self.assertEqual({item['scene_id']:item for item in sample_batch(rules,1)},by_id)
+        policy['body']['default_versions_only']=True
+        with self.assertRaisesRegex(ValueError,'person_1:body_candidate_conflict'):
+            sample_scene(template,rules['seed'],0)
 
     def test_batch_locked_clothing_and_rejections(self):
         rules=json.loads((PROJECT_ROOT/'config/batch_rules.json').read_text())
-        rule=deepcopy(rules['scenes'][0]);rule['frame_count']=2
-        spec=rule['people'][0];pool=spec['components']
-        pool['body']['ids']=['M03']
-        pool['motion']['ids']=['KIT11_walk']
-        pool['clothing']={'kinds':['native_locked'],'ids':['M03_KIT11_BEDLAM_transfer']}
-        spec['motion_start']=[0,0]
-        self.assertEqual(sample_scene(rule,rules['seed'],0)['people'][0]['clothing'],
+        template=deepcopy(rules['templates'][0]);template['base_scene']['frame_count']=2
+        template.pop('route_offset_xy_m');template.pop('rigs')
+        person=template['people'][0]
+        person['components']={
+            'body':{'default_versions_only':True,'ids':['M03']},
+            'motion':{'behavior':'walk','ids':['KIT11_walk']},
+            'clothing':{'kinds':['native_locked'],'ids':['M03_KIT11_BEDLAM_transfer']},
+        }
+        person['motion_start']=[0,0]
+        self.assertEqual(sample_scene(template,rules['seed'],0)['people'][0]['clothing'],
                          'M03_KIT11_BEDLAM_transfer')
-        for kind,ident in (('body','M01'),('motion','KIT425_walk')):
-            bad=deepcopy(rule);bad['people'][0]['components'][kind]['ids']=[ident]
-            with self.assertRaisesRegex(ValueError,'native_clothing_body_motion_or_window_conflict'):
-                sample_scene(bad,rules['seed'],0)
+        bad=deepcopy(template)
+        bad['people'][0]['components']['body']['ids']=['M01']
+        with self.assertRaisesRegex(ValueError,'person_1:clothing_candidate_conflict'):
+            sample_scene(bad,rules['seed'],0)
+        bad=deepcopy(template)
+        bad['people'][0]['components']['motion']['ids']=['missing_motion']
+        with self.assertRaisesRegex(ValueError,'person_1:unknown_motion'):
+            sample_scene(bad,rules['seed'],0)
         inventory=deepcopy(describe())
         locked=next(row for row in inventory['clothing'] if row['id']=='M03_KIT11_BEDLAM_transfer')
         locked['locked_window']=[0,1]
-        with patch('human_data_generator.batch.describe',return_value=inventory):
-            with self.assertRaisesRegex(ValueError,'native_clothing_body_motion_or_window_conflict'):
-                sample_scene(rule,rules['seed'],0)
-        bad=deepcopy(rule);bad['people'][0]['components']['clothing']['ids']=[]
-        bad['people'][0]['components']['body']['ids']=['M01']
-        with self.assertRaisesRegex(ValueError,'no_usable_batch_component:clothing'):
+        with self.assertRaisesRegex(ValueError,'person_1:clothing_candidate_conflict'):
+            sample_scene(template,rules['seed'],0,inventory)
+        for key,value in [('motion_start',[9,1]),('speed_m_s',[0,float('nan')])]:
+            bad=deepcopy(template);bad['people'][0][key]=value
+            with self.assertRaises(ValueError):sample_scene(bad,rules['seed'],0)
+        bad=deepcopy(template);bad['people'][0]['person_id']=42
+        with self.assertRaisesRegex(ValueError,'invalid_person_rule'):
             sample_scene(bad,rules['seed'],0)
-
-        base=rules['scenes'][0]
-        unavailable=next(row['id'] for row in describe()['motions'] if row['status']!='ready')
-        failures=(('body',['missing_body'],'unknown_batch_component'),
-                  ('motion',['KIT11_walk','KIT11_walk'],'invalid_component_ids'),
-                  ('motion',[unavailable],'unavailable_batch_component'),
-                  ('motion',['APD6526'],'batch_component_filter_conflict'),
-                  ('clothing',['M03_KIT11_BEDLAM_transfer'],'batch_component_filter_conflict'))
-        for kind,ids,reason in failures:
-            bad=deepcopy(base)
-            bad['people'][0]['components'][kind]['ids']=ids
-            with self.assertRaisesRegex(ValueError,reason):sample_scene(bad,rules['seed'],0)
-        for kind,key,value,reason in (('body','default_versions_only','true','invalid_default_versions_only'),
-                                      ('clothing','kinds',[],'invalid_clothing_kinds'),
-                                      ('hair','ids','M01_groom','invalid_component_ids')):
-            bad=deepcopy(base)
-            bad['people'][0]['components'][kind][key]=value
-            with self.assertRaisesRegex(ValueError,reason):sample_scene(bad,rules['seed'],0)
-        old=deepcopy(base)
-        old['people'][0]['motion_behavior']='walk'
-        with self.assertRaisesRegex(ValueError,'invalid_batch_rule:person'):
-            sample_scene(old,rules['seed'],0)
+        bad=deepcopy(template);bad['rigs']=[{'rig_id':'rig_missing','offset_yaw_deg':[0,1]}]
+        with self.assertRaisesRegex(ValueError,'invalid_rig_rule'):
+            sample_scene(bad,rules['seed'],0)
+        bad=deepcopy(template);bad['people'][0]['motion_behavior']='walk'
+        with self.assertRaisesRegex(ValueError,'invalid_person_rule_fields'):
+            sample_scene(bad,rules['seed'],0)
 
     def test_batch_cli_writes_only_scene_files(self):
         rules=PROJECT_ROOT/'config/batch_rules.json'
@@ -315,18 +505,19 @@ class CurrentPipelineTest(unittest.TestCase):
             with patch.object(batch,'PROJECT_ROOT',Path(tmp)), \
                  patch('human_data_generator.composition.build',side_effect=AssertionError('built geometry')), \
                  patch('subprocess.Popen',side_effect=AssertionError('started process')):
-                batch.main(['--rules',str(rules),'--name','sample'])
+                batch.main(['--rules',str(rules),'--name','sample','--count','1'])
             folder=Path(tmp)/'outputs/scenes/sample'
-            plan=json.loads((folder/'batch.json').read_text())
-            self.assertEqual(len(plan['scenes']),4)
-            self.assertTrue(all(Path(path).is_file() for path in plan['scenes']))
-            self.assertEqual(len(list(folder.glob('*.json'))),5)
+            files=sorted(folder.glob('*.json'))
+            self.assertEqual(len(files),4)
+            self.assertTrue(all(json.loads(path.read_text())['schema']=='human_scene_v2' for path in files))
+            with patch('sys.stdout',new_callable=StringIO) as stdout:
+                run.main(['plan','--scene',str(files[0])])
+            self.assertGreater(json.loads(stdout.getvalue())['camera_calls'],0)
             old=Path(tmp)/'old_rules.json'
-            old.write_text(json.dumps({'schema':'human_batch_v1','seed':1,
-                                       'scenes':['city_single_walk']}))
+            old.write_text(json.dumps({'schema':'human_batch_v2','seed':1,'scenes':[]}))
             with patch.object(batch,'PROJECT_ROOT',Path(tmp)):
                 with self.assertRaisesRegex(ValueError,'invalid_batch_rules'):
-                    batch.main(['--rules',str(old),'--name','old'])
+                    batch.main(['--rules',str(old),'--name','old','--count','1'])
             self.assertFalse((Path(tmp)/'outputs/scenes/old').exists())
 
     def test_prepare_budget_and_mock_launch(self):
@@ -544,9 +735,10 @@ class CurrentPipelineTest(unittest.TestCase):
             def capture_camera(scene,cam,node,camera,dest,task_root):
                 seen_cameras.append((camera['id'],task_root))
                 return [dict(id=camera['id'],source='fixture.exr')]
+            (root/'rigs/rig_alpha').mkdir(parents=True)
+            put(root/'rigs/rig_alpha/planned_regions.json',
+                {'1': {cid: {'roi_xyxy': [0,0,4,4]} for cid in ('cam2','cam4')}})
             with patch.object(roi_module,'render_cameras',side_effect=capture_camera),\
-                 patch.object(roi_module,'project_erp',return_value=(np.array([[1.,1.]]),None)),\
-                 patch.object(roi_module,'plan_person_crop_union',return_value=dict(roi_xyxy=[0,0,4,4])),\
                  patch.object(roi_module,'border_coordinates',return_value=(0.,1.,0.,1.)):
                 result=roi_module.render_rig_roi(scene,None,SimpleNamespace(directory=''),source,root,
                     dict(rig_id='rig_alpha',people=[dict(person_id=7)]),

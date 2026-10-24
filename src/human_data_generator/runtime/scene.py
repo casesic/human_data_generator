@@ -81,6 +81,57 @@ def _curve(points, distance):
     return xy, tangent
 
 
+def route_positions(scene, *, allow_partial=False):
+    """Editor positions use the same curve and clock as preparation.
+
+    The editor may display valid people while reporting another person's route error.
+    Preparation still calls the strict path and rejects an invalid scene.
+    """
+    count = scene.get("frame_count")
+    fps = scene.get("fps")
+    if (
+        scene.get("schema") != SCHEMA
+        or type(count) is not int
+        or count < 1
+        or type(fps) is not int
+        or fps < 1
+        or not isinstance(scene.get("people"), list)
+    ):
+        raise ValueError("invalid_scene_clock_or_people")
+    people = {}
+    errors = {}
+    for person in scene["people"]:
+        pid = person.get("person_id")
+        if type(pid) is not int or pid < 1 or str(pid) in people:
+            raise ValueError("invalid_person_id")
+        speed = person.get("speed_m_s")
+        start = person.get("start_progress_m")
+        if any(type(value) not in (int, float) or not math.isfinite(value) for value in (speed, start)):
+            reason = f"person_{pid}:invalid_route_time"
+            if not allow_partial:
+                raise ValueError(reason)
+            errors[str(pid)] = reason
+            continue
+        frames = []
+        try:
+            for frame in range(count):
+                xy, tangent = _curve(person["route_xy_m"], start + speed * frame / fps)
+                frames.append(dict(xy=xy.tolist(), direction=tangent.tolist()))
+        except (KeyError, ValueError) as error:
+            reason = f"person_{pid}:frame_{frame}:{error}"
+            if not allow_partial:
+                raise ValueError(reason) from error
+            errors[str(pid)] = reason
+            if frames:
+                people[str(pid)] = frames
+            continue
+        people[str(pid)] = frames
+    result = dict(frame_count=count, fps=fps, people=people)
+    if allow_partial:
+        result["errors"] = errors
+    return result
+
+
 def _asset_timeline(motion, start, count, fps):
     rows = json.loads(Path(motion["timeline"]).read_text())
     if type(start) is not int or start < 0 or start >= len(rows):
@@ -94,7 +145,11 @@ def _asset_timeline(motion, start, count, fps):
     for k in range(count):
         target = k / fps
         if target > seconds[-1] + 1e-9:
-            raise ValueError("motion_exceeds_cache")
+            raise ValueError(
+                f"motion_exceeds_cache:required_s={target:.3f}:"
+                f"available_s={seconds[-1]:.3f}:motion_start={start}:"
+                f"frame_count={count}:fps={fps}"
+            )
         j = int(np.argmin(np.abs(seconds[start:] - target))) + start
         row = rows[j]
         if row["asset_frame"] >= len(rows):
@@ -137,9 +192,12 @@ def validate_scene(scene):
         if not 0.1 <= float(p["speed_m_s"]) <= 4 or float(p["start_progress_m"]) < 0:
             raise ValueError("invalid_person_speed_or_start")
         chosen = select(p, components)
-        records = _asset_timeline(
-            chosen["motion"], p["motion_start"], scene["frame_count"], scene["fps"]
-        )
+        try:
+            records = _asset_timeline(
+                chosen["motion"], p["motion_start"], scene["frame_count"], scene["fps"]
+            )
+        except ValueError as error:
+            raise ValueError(f"person_{pid}:{p['motion']}:{error}") from error
         if chosen["clothing"]["kind"] == "native_locked":
             low, high = chosen["clothing"]["locked_window"]
             if (
@@ -328,25 +386,15 @@ def validate(scene, frames=None, rig_ids=None):
         return dict(status="rejected", errors=["invalid_selected_rigs"], checked_frames=chosen)
     roads = map_data(scene["environment"])["roads"]
     for k in chosen:
-        roots = []
         for p in scene["people"]:
             try:
                 xy, _ = _curve(
                     p["route_xy_m"], p["start_progress_m"] + p["speed_m_s"] * k / scene["fps"]
                 )
-                roots.append((p["person_id"], xy))
                 if not any(a <= xy[0] <= c and b <= xy[1] <= d for a, b, c, d in roads):
                     errors.append(f"p{p['person_id']}:frame{k}:outside_verified_road")
             except ValueError as exc:
                 errors.append(f"p{p['person_id']}:frame{k}:{exc}")
-        for a in range(len(roots)):
-            for b in range(a + 1, len(roots)):
-                if np.linalg.norm(roots[a][1] - roots[b][1]) < 0.9:
-                    errors.append(f"p{roots[a][0]}_p{roots[b][0]}:frame{k}:root_clearance")
-        for rig in rigs:
-            for pid, xy in roots:
-                if np.linalg.norm(xy - np.asarray(rig["origin_m"][:2])) < 0.5:
-                    errors.append(f"{rig['rig_id']}:p{pid}:frame{k}:camera_clearance")
     return dict(
         status="passed" if not errors else "rejected", errors=errors[:100], checked_frames=chosen
     )

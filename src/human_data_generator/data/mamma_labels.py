@@ -171,11 +171,16 @@ def build_evidence(
     )
     roi = np.asarray(coverage_region, int)
     pixel = np.floor(xy).astype(int)
+    periodic_coverage = roi[0] == 0 and roi[2] == physical_mask.shape[1]
+    covered_x = (
+        np.ones(len(xy), bool)
+        if periodic_coverage
+        else (pixel[:, 0] - 2 >= roi[0]) & (pixel[:, 0] + 2 < roi[2])
+    )
     coverage = (
         np.isfinite(xy).all(1)
-        & (pixel[:, 0] - 2 >= roi[0])
+        & covered_x
         & (pixel[:, 1] - 2 >= roi[1])
-        & (pixel[:, 0] + 2 < roi[2])
         & (pixel[:, 1] + 2 < roi[3])
     )
     first = []

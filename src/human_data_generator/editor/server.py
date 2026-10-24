@@ -13,14 +13,40 @@ import uuid
 from urllib.parse import urlparse, parse_qs
 
 from human_data_generator.config import PROJECT_ROOT
+from human_data_generator.batch import SCHEMA as BATCH_SCHEMA, sample_batch
 from human_data_generator.editor.core import default_scene
 from human_data_generator.io.json_file import read_json, write_json
-from human_data_generator.runtime.scene import map_data, validate
+from human_data_generator.runtime.scene import map_data, route_positions, validate
 
-WEB = Path(__file__).with_name("index_current.html")
+WEB = Path(__file__).with_name("index.html")
 TASKS = {}
 LOCK = threading.Lock()
 RECIPES = PROJECT_ROOT / "outputs/recipes"
+RULES = PROJECT_ROOT / "outputs/rules"
+STATIC = {
+    "/": ("index.html", "text/html"),
+    "/editor.css": ("editor.css", "text/css"),
+    "/editor.js": ("editor.js", "text/javascript"),
+    "/editor_map.js": ("editor_map.js", "text/javascript"),
+}
+
+
+def _saved_names(folder, *, allow_hyphen=False):
+    if not folder.exists():
+        return []
+    pattern = r"[a-z0-9_-]{1,64}" if allow_hyphen else r"[a-z0-9_]+"
+    return sorted(p.stem for p in folder.glob("*.json") if re.fullmatch(pattern, p.stem))
+
+
+def _current_rule_names():
+    names = []
+    for name in _saved_names(RULES, allow_hyphen=True):
+        try:
+            if read_json(RULES / f"{name}.json").get("schema") == BATCH_SCHEMA:
+                names.append(name)
+        except (OSError, ValueError):
+            continue
+    return names
 
 
 def _gpu_uuid():
@@ -126,6 +152,16 @@ def start_task(kind, scene, frame=None, rig_id=None, budget_seconds=None):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _bytes(self, payload, mime, *, attachment=None):
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        if attachment:
+            self.send_header("Content-Disposition", f'attachment; filename="{attachment}"')
+        self.end_headers()
+        self.wfile.write(payload)
+
     def _reply(self, value, status=200):
         payload = json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
         self.send_response(status)
@@ -144,14 +180,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
-            if parsed.path == "/":
-                payload = WEB.read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-                return
+            if parsed.path in STATIC:
+                filename, mime = STATIC[parsed.path]
+                return self._bytes(WEB.with_name(filename).read_bytes(), mime + "; charset=utf-8")
             if parsed.path == "/api/example":
                 return self._reply(default_scene(query.get("environment", ["city"])[0]))
             if parsed.path == "/api/map":
@@ -170,6 +201,18 @@ class Handler(BaseHTTPRequestHandler):
                 if re.fullmatch(r"[a-z0-9_]+__r\d+", name) is None:
                     raise ValueError("invalid_recipe_id")
                 return self._reply(read_json(RECIPES / (name + ".json")))
+            if parsed.path == "/api/recipes":
+                return self._reply({"names": _saved_names(RECIPES)})
+            if parsed.path == "/api/rules":
+                return self._reply({"names": _current_rule_names()})
+            if parsed.path in ("/api/rule", "/api/rule/download"):
+                name = query.get("name", [""])[0]
+                if re.fullmatch(r"[a-z0-9_-]{1,64}", name) is None:
+                    raise ValueError("invalid_rule_name")
+                payload = (RULES / f"{name}.json").read_bytes()
+                if parsed.path.endswith("download"):
+                    return self._bytes(payload, "application/json", attachment=name + ".json")
+                return self._reply(json.loads(payload))
             if parsed.path.startswith("/api/image/"):
                 _, _, _, task_id, camera = parsed.path.split("/")
                 task = TASKS.get(task_id)
@@ -204,6 +247,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             if self.path == "/api/check":
                 return self._reply(validate(body["scene"], body.get("frames"), body.get("rig_ids")))
+            if self.path == "/api/trajectory":
+                return self._reply(route_positions(body["scene"], allow_partial=True))
             if self.path == "/api/save":
                 scene = body["scene"]
                 check = validate(scene)
@@ -216,6 +261,28 @@ class Handler(BaseHTTPRequestHandler):
                 name = f"{scene['scene_id']}__r{revision}"
                 write_json(RECIPES / (name + ".json"), scene)
                 return self._reply({"id": name, "path": str(RECIPES / (name + ".json"))})
+            if self.path == "/api/try-rules":
+                scenes = sample_batch(body["rules"], 2)
+                return self._reply({"scenes": scenes})
+            if self.path == "/api/export-rules":
+                name = body["name"]
+                if not isinstance(name, str) or re.fullmatch(r"[a-z0-9_-]{1,64}", name) is None:
+                    raise ValueError("invalid_rule_name")
+                rules = body["rules"]
+                sample_batch(rules, 2)
+                RULES.mkdir(parents=True, exist_ok=True)
+                path = RULES / (name + ".json")
+                # Export is immutable. Another browser or task cannot lose an older rule.
+                with path.open("x", encoding="utf-8") as stream:
+                    json.dump(rules, stream, ensure_ascii=False, allow_nan=False, indent=2)
+                    stream.write("\n")
+                return self._reply(
+                    {
+                        "path": str(path),
+                        "download": "/api/rule/download?name=" + name,
+                        "command": f"$GEN_PY -m human_data_generator.batch --rules {path} --name {name} --count 10",
+                    }
+                )
             if self.path == "/api/start":
                 return self._reply(
                     start_task(

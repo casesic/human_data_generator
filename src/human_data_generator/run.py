@@ -79,14 +79,9 @@ def _check_gpu(gpu_uuid):
     )
     evidence = {key: subprocess.check_output(cmd, text=True) for key, cmd in queries.items()}
     gpu = next((row for row in evidence["gpus"].splitlines()[1:] if gpu_uuid in row), None)
-    if (
-        gpu is None
-        or int(gpu.split(",")[2].split()[0]) > 512
-        or int(gpu.split(",")[4].split()[0]) > 5
-    ):
+    if gpu is None:
         raise RuntimeError("selected_GPU_unavailable")
-    if any(gpu_uuid in row for row in evidence["compute"].splitlines()[1:]):
-        raise RuntimeError("other_GPU_compute_process_present")
+    evidence["selected_index"] = int(gpu.split(",")[0])
     return evidence
 
 
@@ -170,7 +165,7 @@ def render_prepared(output, gpu_uuid, budget_seconds, video=False):
     if type(budget_seconds) is not int or budget_seconds < 1:
         raise ValueError("positive_budget_required")
     _preflight_consumer(config["consumer_python"])
-    _check_gpu(gpu_uuid)
+    gpu_evidence = _check_gpu(gpu_uuid)
 
     started = time.monotonic()
     deadline = started + budget_seconds
@@ -178,7 +173,8 @@ def render_prepared(output, gpu_uuid, budget_seconds, video=False):
                   deadline_monotonic=deadline)
     write_json(output / "run_config.json", config)
     status = dict(schema="human_task_status_v1", state="running", stage="render",
-                  data_complete=False, gpu_uuid=gpu_uuid, budget_seconds=budget_seconds)
+                  data_complete=False, gpu_uuid=gpu_uuid,
+                  gpu_index=gpu_evidence.get("selected_index"), budget_seconds=budget_seconds)
     def save_status(state, stage, **details):
         status.update(state=state, stage=stage, **details)
         write_json(output / "status.json", status)

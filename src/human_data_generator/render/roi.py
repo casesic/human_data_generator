@@ -36,8 +36,7 @@ def scene_settings(s):
 
 
 from human_data_generator.rendering.blender.assembly import render_cameras
-from human_data_generator.camera.erp import project_erp
-from human_data_generator.imaging.roi_planning import plan_person_crop_union, border_coordinates
+from human_data_generator.imaging.roi_planning import border_coordinates
 
 
 def write(p, v):
@@ -59,16 +58,17 @@ def render_rig_roi(
 ):
     """Render one rig from the *already updated* scene geometry."""
     begin = time.monotonic()
-    ids = {p["person_id"] for p in recipe["people"]}
+    if {p["person_id"] for p in recipe["people"]} != set(part_owners.values()):
+        raise ValueError("live_person_geometry_missing")
+    if any(not np.isfinite(points).all() for points in world_parts.values()):
+        raise ValueError("nonfinite_live_person_geometry")
+    # CPU preparation owns ROI decisions, including the ERP seam. Reading its
+    # frozen plan here makes the actual Blender border exactly the same.
+    planned_path = task_root / "rigs" / recipe["rig_id"] / "planned_regions.json"
+    prepared = json.loads(planned_path.read_text())[str(frame)]
     plans = {}
     for camera in cameras:
-        pose = np.array(camera["camera_to_world"])
-        parts = {n: project_erp(p, pose, 5760, 2880)[0] for n, p in world_parts.items()}
-        grouped = {
-            str(pid): {name: xy for name, xy in parts.items() if part_owners[name] == pid}
-            for pid in ids
-        }
-        region = plan_person_crop_union(grouped, (5760, 2880))
+        region = prepared[camera["id"]]
         plans[camera["id"]] = dict(region, camera_to_world=camera["camera_to_world"])
         if "max_union_roi_pixels" in recipe:
             x0, y0, x1, y1 = region["roi_xyxy"]

@@ -13,10 +13,37 @@ from human_data_generator.camera.domain import point_in_view
 from human_data_generator.config import resources
 from human_data_generator.data.mamma_labels import ordered_vertex_ids
 from human_data_generator.data.scene_geometry import person_geometry, transform
+from human_data_generator.data.dynamic_scene import geometry_paths
 from human_data_generator.imaging.roi_planning import plan_person_crop_union
 from human_data_generator.io.json_file import write_json
 from human_data_generator.runtime.scene import read_scene, compile_scene, validate, map_data
 from human_data_generator.runtime.task_paths import RUN_SCHEMA
+
+
+def _surface_may_enter_valid_mask(projected, faces, valid):
+    """Conservative raster-box test for a triangle clipped by the lens edge.
+
+    A valid pixel inside a triangle's projected bounding box keeps the person.
+    False positives only enlarge ROI; a vertex-only visibility check could
+    silently discard a thin visible part of body or clothing.
+    """
+    height, width = valid.shape
+    tri = projected[faces]
+    x = tri[:, :, 0]
+    x = x[:, :1] + (x - x[:, :1] + width / 2) % width - width / 2
+    x0 = np.floor(x.min(1) - 2).astype(int)
+    x1 = np.ceil(x.max(1) + 2).astype(int)
+    y0 = np.clip(np.floor(tri[:, :, 1].min(1) - 2).astype(int), 0, height)
+    y1 = np.clip(np.ceil(tri[:, :, 1].max(1) + 2).astype(int), 0, height)
+    integral = np.pad(valid.astype(np.int32), ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+    for shift in (-width, 0, width):
+        left = np.clip(x0 + shift, 0, width)
+        right = np.clip(x1 + shift, 0, width)
+        candidate = (left < right) & (y0 < y1)
+        overlap = integral[y1, right] - integral[y0, right] - integral[y1, left] + integral[y0, left]
+        if np.any(candidate & (overlap > 0)):
+            return True
+    return False
 
 
 def prepare(output, *, scene_path, frame_indices=None, selected_rig_ids=None, preview=False):
@@ -63,6 +90,12 @@ def prepare(output, *, scene_path, frame_indices=None, selected_rig_ids=None, pr
         render=dict(source_resolution=[5760, 2880], samples=64, seed=scene["seed"]),
     )
     bodies = person_geometry(recipe, frames)
+    surface_faces = []
+    for body in bodies:
+        paths = geometry_paths(body["asset"])
+        surface_faces.append(
+            {name: np.load(paths[name + "_faces"], mmap_mode="r") for name in ("body", "cloth")}
+        )
     roads = map_data(scene["environment"])["roads"]
     world_parts = {}
     for frame in frames:
@@ -129,17 +162,39 @@ def prepare(output, *, scene_path, frame_indices=None, selected_rig_ids=None, pr
                 grouped = {}
                 for j, body in enumerate(bodies):
                     parts = world_parts[frame, j]
-                    grouped[str(people[j]["person_id"])] = {
-                        name: project_erp(points, pose, 5760, 2880)[0]
-                        for name, points in parts.items()
-                    }
-                    _, _, _, _, visible = point_in_view(
-                        np.concatenate((parts["body"], parts["cloth"])), pose, cid, valid[cid]
+                    projected = {}
+                    eligible = False
+                    for name, points in parts.items():
+                        xy, _, _, _, in_view = point_in_view(points, pose, cid, valid[cid])
+                        projected[name] = xy
+                        eligible |= bool(in_view.any())
+                    if not eligible:
+                        # A clipped triangle can enter the lens even if all
+                        # vertices are outside its physical valid pixels.
+                        for name in ("body", "cloth"):
+                            if _surface_may_enter_valid_mask(
+                                projected[name], surface_faces[j][name], valid[cid]
+                            ):
+                                eligible = True
+                                break
+                    if eligible:
+                        grouped[str(people[j]["person_id"])] = projected
+                if grouped:
+                    region = plan_person_crop_union(grouped, (5760, 2880))
+                else:
+                    # Keep a real (but small) camera product so all people
+                    # still receive absent observation slots.
+                    y, x = np.unravel_index(int(np.argmax(valid[cid])), valid[cid].shape)
+                    x0 = int(np.clip(x - 32, 0, 5760 - 64))
+                    y0 = int(np.clip(y - 32, 0, 2880 - 64))
+                    region = dict(
+                        roi_xyxy=[x0, y0, x0 + 64, y0 + 64],
+                        person_regions={},
+                        planning_method="empty_physical_camera",
                     )
-                    if not visible.any():
-                        continue
-                region = plan_person_crop_union(grouped, (5760, 2880))
-                if np.prod(np.subtract(region["roi_xyxy"][2:], region["roi_xyxy"][:2])) > 7_000_000:
+                area = np.prod(np.subtract(region["roi_xyxy"][2:], region["roi_xyxy"][:2]))
+                full_width = region["roi_xyxy"][0] == 0 and region["roi_xyxy"][2] == 5760
+                if area > 7_000_000 and not full_width:
                     raise ValueError("ROI_pixel_budget")
                 frame_plans[cid] = region
             planned[frame] = frame_plans

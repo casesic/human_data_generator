@@ -81,14 +81,21 @@ def point_occlusion_evidence(
     known = set(known_person_ids)
     h, w = depth.shape
     for k, (u, v) in enumerate(xy):
-        x, y = int(np.floor(u)), int(np.floor(v))
-        if x < 1 or y < 1 or x + 1 >= w or y + 1 >= h or not np.isfinite([u, v]).all():
+        if not np.isfinite([u, v]).all():
             if strict_coverage:
                 raise ValueError("evidence_neighborhood_outside_raster")
             codes[k] = 6
             continue
-        d = depth[y - 1 : y + 2, x - 1 : x + 2]
-        ids = instance[y - 1 : y + 2, x - 1 : x + 2]
+        x, y = int(np.floor(u)) % w, int(np.floor(v))
+        if y < 1 or y + 1 >= h:
+            if strict_coverage:
+                raise ValueError("evidence_neighborhood_outside_raster")
+            codes[k] = 6
+            continue
+        columns = (np.arange(x - 1, x + 2) % w)
+        rows = np.arange(y - 1, y + 2)
+        d = depth[np.ix_(rows, columns)]
+        ids = instance[np.ix_(rows, columns)]
         if not np.isfinite(d).all() or not np.isfinite(ids).all():
             if strict_coverage:
                 raise ValueError("evidence_neighborhood_unobserved")

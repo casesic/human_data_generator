@@ -1,219 +1,86 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>场景编辑器 A3</title><style>
-:root{font:14px system-ui,sans-serif;color:#e9edf2;background:#151b20}*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button{background:#2b3942;color:#eef5f3;border:1px solid #49616a;padding:6px 9px;border-radius:6px;cursor:pointer}button:hover{background:#3a515b}button:disabled{opacity:.45;cursor:default}input,select{background:#1c272d;color:#f1f5f5;border:1px solid #53656c;border-radius:5px;padding:5px}input[type=number]{width:95px}input[type=range]{width:100%}header{height:54px;padding:9px 16px;background:#22313a;display:flex;align-items:center;gap:12px}header strong{font-size:19px}.app{height:calc(100vh - 54px);display:grid;grid-template-columns:230px minmax(340px,1fr) 280px;grid-template-rows:minmax(330px,1fr) 220px}aside{padding:14px;overflow:auto;border-right:1px solid #34454b}aside.right{border-left:1px solid #34454b;border-right:0}main{position:relative;overflow:hidden;background:#1d2427}canvas{width:100%;height:100%;display:block;touch-action:none}.maptip{position:absolute;left:12px;bottom:12px;background:#172126dc;padding:7px 10px;border-radius:5px;pointer-events:none}footer{grid-column:1/4;border-top:1px solid #34454b;padding:11px 16px;overflow:auto;background:#192127}.row{display:flex;align-items:center;gap:7px;margin:8px 0;flex-wrap:wrap}.row label{min-width:72px;color:#adc5c4}.card{padding:8px;border:1px solid #415057;border-radius:7px;margin:8px 0;cursor:pointer}.card.active{border-color:#8bdb99;background:#253a35}.muted{color:#a5b3b9;font-size:12px}.warn{color:#ffd68f}.ok{color:#8fe8ad}h3{margin:4px 0 10px;font-size:15px}hr{border:0;border-top:1px solid #37464d;margin:14px 0}.preview{display:flex;gap:10px;height:125px}.preview>div{flex:1;background:#222d32;overflow:hidden;text-align:center}.preview img{max-width:100%;height:100px;object-fit:contain}#status{white-space:pre-wrap;max-height:90px;overflow:auto}.small{font-size:12px}details{margin-top:12px}.tools{display:flex;gap:5px;flex-wrap:wrap}
-#episodePanel video{display:block;width:min(100%,780px);max-height:225px;background:#111}#videoPath{overflow-wrap:anywhere}
-</style><header><strong>俯视场景编辑器</strong><span class="muted">XY 米制 · Z 向上 · 10 Hz / 31 时刻</span><span id="rev" class="warn"></span></header>
-<div class="app" id="app"><aside><h3>场景与人物</h3><div class="row"><label>环境</label><select id="scene"><option value="city">城市 T 路口</option><option value="riverfront">河岸步道</option></select></div><div class="row"><label>场景编号</label><input id="recipeId" style="width:125px"></div><div class="row"><label>种子</label><input id="seed" type="number"></div><p class="muted">只提供已注册的不同身份；新人物路线从起点、终点两个点开始。种子记录在配方中，当前不重抽身体或衣发。</p><div id="people"></div><div class="row"><button id="addPerson">增加人物</button><button id="removePerson">移除末位</button></div><hr><h3>相机组</h3><div id="rigs"></div><div class="row"><button id="addRig">复制所选双机组</button><button id="removeRig">移除所选</button></div><div class="row"><button id="undo">撤销</button><button id="redo">重做</button></div><div class="row"><button id="save">保存修订</button><input id="loadId" placeholder="city_example_r1" style="width:150px"><button id="load">载入</button></div><details><summary>来源与生产约束</summary><p class="muted">绑定双机基线 0.18 m 为合成配置。绿色是候选道路，未知区域灰色。预览只检查所选时刻；整段需完整预检。所有输出 integration_only。</p><pre id="technical" class="small"></pre></details></aside>
-<main><canvas id="map"></canvas><div class="maptip" id="coords">鼠标 XY：— · 1 格 = 1 m</div></main>
-<aside class="right"><h3>编辑</h3><div class="tools"><button id="routeMode">轨迹模式</button><button id="rigMode">机位模式</button><button id="panMode">平移模式</button></div><p class="muted">轨迹：先选人物，拖动控制点；开启“添加控制点”后点可见曲线附近即可插入。机位：点中双机组可拖动，点击地图可放置所选机位；右侧可输入精确坐标。滚轮缩放。</p><div id="properties"></div><hr><button id="check">检查当前时刻</button> <button id="checkAll">全段 CPU 检查</button><div id="checkResult" class="small muted"></div></aside>
-<footer><div class="row"><label>时刻</label><input id="timeline" type="range" min="0" max="30" value="15" style="flex:1"><strong id="time">1.5 秒 / frame 15</strong><label>预览 rig</label><select id="previewRig"></select><button id="preview">预览当前时刻</button><button id="generate">生成整段</button><button id="showEpisodes" hidden>查看视频</button><button id="cancel" disabled>取消任务</button></div><div id="status" class="small muted">等待操作。拖动和时间轴不会启动渲染。</div><div class="preview"><div>cam2<br><img id="cam2"></div><div>cam4<br><img id="cam4"></div></div>
-<section id="episodePanel" hidden><div class="row"><label>已生成整段</label><select id="episodeChoice"></select><label>机位组</label><select id="videoRig"></select><a id="downloadVideo" download>下载 MP4</a></div><video id="episodeVideo" controls preload="metadata"></video><div id="videoPath" class="small muted"></div></section></footer></div>
-<script>
-const $=x=>document.getElementById(x);let recipe,map,selectedPerson=1,selectedRig=null,mode='route',frame=15,history=[],future=[],drag=null,view={x:0,y:80,scale:9},lastTask=null,lastTaskReused=false,previewRevision=null,episodeCatalog=[],selectedPoint=0,addPointMode=false;
-async function api(path,body){let r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{});let x=await r.json();if(!r.ok)throw Error(x.error||r.status);return x}
-function snapshot(){history.push(JSON.stringify(recipe));if(history.length>60)history.shift();future=[]}
-function changed(){recipe.parent_revision=recipe.revision;recipe.revision++;previewRevision=null;$('rev').textContent=`修订 r${recipe.revision} · 旧预览已过期`;refresh()}
-function setStatus(x){$('status').textContent=x}
-function canvasSize(){let c=$('map'),d=devicePixelRatio||1;c.width=c.clientWidth*d;c.height=c.clientHeight*d;let ctx=c.getContext('2d');ctx.setTransform(d,0,0,d,0,0);draw()}
-function toScreen(p){let c=$('map');return [c.clientWidth/2+(p[0]-view.x)*view.scale,c.clientHeight/2-(p[1]-view.y)*view.scale]}
-function toWorld(x,y){let c=$('map');return [view.x+(x-c.clientWidth/2)/view.scale,view.y-(y-c.clientHeight/2)/view.scale]}
-function canvasPoint(e){let r=$('map').getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]}
-function rect(ctx,b,color){let a=toScreen([b[0],b[3]]),z=toScreen([b[2],b[1]]);ctx.fillStyle=color;ctx.fillRect(a[0],a[1],z[0]-a[0],z[1]-a[1])}
-function curve(points){if(points.length<2)return points;let s=[];for(let i=0;i<points.length-1;i++){let a=points[Math.max(i-1,0)],b=points[i],c=points[i+1],d=points[Math.min(i+2,points.length-1)];for(let n=0;n<41;n++){let u=n/41;s.push([0,1].map(z=>.5*((2*b[z])+(-a[z]+c[z])*u+(2*a[z]-5*b[z]+4*c[z]-d[z])*u*u+(-a[z]+3*b[z]-3*c[z]+d[z])*u*u*u)))}}s.push(points.at(-1));return s}
-function nearestRouteInsertion(points,x,y){
- if(points.length<2)return null;
- let samples=curve(points),best={distance:Infinity};
- for(let j=1;j<samples.length;j++){
-  let a=toScreen(samples[j-1]),b=toScreen(samples[j]),dx=b[0]-a[0],dy=b[1]-a[1],denom=dx*dx+dy*dy;
-  let t=denom?Math.max(0,Math.min(1,((x-a[0])*dx+(y-a[1])*dy)/denom)):0;
-  let sx=a[0]+t*dx,sy=a[1]+t*dy,distance=Math.hypot(x-sx,y-sy);
-  if(distance<best.distance)best={distance,index:Math.min(points.length-1,Math.floor((j-1)/41)+1),location:toWorld(sx,sy)};
- }
- // Clicking an existing handle should still insert a useful point, not duplicate that handle.
- let before=points[best.index-1],after=points[best.index];
- if(Math.min(Math.hypot(best.location[0]-before[0],best.location[1]-before[1]),Math.hypot(best.location[0]-after[0],best.location[1]-after[1]))<.03){
-  best.location=samples[(best.index-1)*41+20];
- }
- best.tooShort=Math.min(Math.hypot(best.location[0]-before[0],best.location[1]-before[1]),Math.hypot(best.location[0]-after[0],best.location[1]-after[1]))<.015;
- return best;
-}
-function personState(p,k){
- let samples=curve(p.control_points_xy_m);if(samples.length<2)return null;
- let lengths=[0];for(let i=1;i<samples.length;i++)lengths.push(lengths.at(-1)+Math.hypot(samples[i][0]-samples[i-1][0],samples[i][1]-samples[i-1][1]));
- let total=lengths.at(-1),distance=p.start_progress_m+p.speed_m_s*k/10;
- if(distance<0||distance>total)return {error:'路线长度不足',distance,total};
- function at(d){let i=1;while(i<lengths.length-1&&lengths[i]<d)i++;let span=lengths[i]-lengths[i-1],u=span?Math.max(0,Math.min(1,(d-lengths[i-1])/span)):0;return [samples[i-1][0]*(1-u)+samples[i][0]*u,samples[i-1][1]*(1-u)+samples[i][1]*u]}
- let xy=at(distance),lo=at(Math.max(0,distance-.025)),hi=at(Math.min(total,distance+.025));
- let dx=hi[0]-lo[0],dy=hi[1]-lo[1],m=Math.hypot(dx,dy);
- if(m<1e-9)return {error:'路线切线无效',distance,total};
- return {xy,tangent:[dx/m,dy/m],headingDeg:Math.atan2(dy,dx)*180/Math.PI,distance,total};
-}
-function personAt(p,k){let state=personState(p,k);return state&&state.xy||null}
-function routeIssue(points){
- for(let i=1;i<points.length-1;i++){
-  let a=[points[i][0]-points[i-1][0],points[i][1]-points[i-1][1]],b=[points[i+1][0]-points[i][0],points[i+1][1]-points[i][1]];
-  let al=Math.hypot(...a),bl=Math.hypot(...b);
-  if(al>.2&&bl>.2&&(a[0]*b[0]+a[1]*b[1])/(al*bl)<-.8)return {index:i,legA:al,legB:bl};
- }
- return null;
-}
-function draw(){if(!recipe||!map)return;let c=$('map'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.clientWidth,c.clientHeight);ctx.fillStyle='#555f60';ctx.fillRect(0,0,c.clientWidth,c.clientHeight);
- for(let r of map.water)rect(ctx,r,'#2f6d88');for(let r of map.roads)rect(ctx,r,'#4e9c5b');for(let r of map.obstacles)rect(ctx,r,'#72615c');
- ctx.lineWidth=1;ctx.strokeStyle='#ffffff33';let [a,b]=toWorld(0,c.clientHeight),[d,e]=toWorld(c.clientWidth,0);for(let x=Math.ceil(a/5)*5;x<d;x+=5){let q=toScreen([x,0])[0];ctx.beginPath();ctx.moveTo(q,0);ctx.lineTo(q,c.clientHeight);ctx.stroke()}for(let y=Math.ceil(b/5)*5;y<e;y+=5){let q=toScreen([0,y])[1];ctx.beginPath();ctx.moveTo(0,q);ctx.lineTo(c.clientWidth,q);ctx.stroke()}
- for(let p of recipe.people){
-  let points=p.control_points_xy_m,selected=p.person_id===selectedPerson,issue=routeIssue(points),pts=curve(points);
-  ctx.beginPath();pts.forEach((z,i)=>{let q=toScreen(z);i?ctx.lineTo(...q):ctx.moveTo(...q)});
-  ctx.strokeStyle=selected?'#ffcf73':'#d9e88e';ctx.lineWidth=selected?3:2;ctx.stroke();
-  points.forEach((z,i)=>{if(!selected&&i%5!==0)return;if(selected&&i%5!==0&&i!==selectedPoint&&i!==issue?.index)return;
-   let q=toScreen(z),focus=selected&&i===selectedPoint,bad=selected&&i===issue?.index;
-   ctx.beginPath();ctx.arc(...q,focus?8:5,0,7);ctx.fillStyle=bad?'#ff6464':focus?'#fff5b8':selected?'#ffcf73':'#d9e88e';ctx.fill();
-   if(focus){ctx.fillStyle='white';ctx.fillText('点 '+(i+1),q[0]+10,q[1]-10)}
-  });
-  let state=personState(p,frame);if(state&&state.xy){
-   let q=toScreen(state.xy);ctx.beginPath();ctx.arc(...q,Math.max(5,.45*view.scale),0,7);ctx.fillStyle='#f5ad66bb';ctx.fill();
-   ctx.beginPath();ctx.moveTo(...q);ctx.lineTo(q[0]+22*state.tangent[0],q[1]-22*state.tangent[1]);ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
-   ctx.fillStyle='white';ctx.fillText('P'+p.person_id,q[0]+6,q[1]-7)
-  }
- }
- for(let r of recipe.rigs){let p=toScreen(r.origin_m),rad=r.yaw_deg*Math.PI/180;ctx.beginPath();ctx.arc(...p,8,0,7);ctx.fillStyle=r.rig_id===selectedRig?'#7df4ef':'#f5f5ef';ctx.fill();ctx.beginPath();ctx.moveTo(...p);ctx.lineTo(p[0]+20*Math.cos(rad),p[1]-20*Math.sin(rad));ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();for(let sign of [-1,1]){let eye=[r.origin_m[0]-Math.sin(rad)*sign*.09,r.origin_m[1]+Math.cos(rad)*sign*.09],q=toScreen(eye);ctx.beginPath();ctx.arc(...q,3,0,7);ctx.fillStyle='#26383b';ctx.fill()}ctx.fillStyle='white';ctx.fillText(r.rig_id,p[0]+10,p[1]-10)}
- ctx.fillStyle='white';ctx.font='12px sans-serif';ctx.fillText('↑ +Y 北',14,22);ctx.fillText(`${(50/view.scale).toFixed(1)} m`,14,44);ctx.fillRect(14,49,50,2)}
-function properties(){
- let box=$('properties');box.innerHTML='';
- if(mode==='route'){
-  let p=recipe.people.find(x=>x.person_id===selectedPerson);if(!p)return;
-  let points=p.control_points_xy_m;selectedPoint=Math.min(selectedPoint,Math.max(0,points.length-1));
-  let selected=points[selectedPoint],state=personState(p,frame),issue=routeIssue(points);
-  box.innerHTML='<h3>人物 '+p.person_id+' · '+p.role+'</h3>'+
-   '<div class="row"><label>速度 m/s</label><input id="speed" type="number" min="0.1" max="4" step="0.01" value="'+p.speed_m_s+'"></div>'+
-   '<div class="row"><label>起始进度 m</label><input id="progress" type="number" min="0" step="0.01" value="'+p.start_progress_m+'"></div>'+
-   '<div class="row"><label>控制点</label><select id="pointSelect"></select><span class="muted">共 '+points.length+' 点</span></div>'+
-   '<div class="row"><label>X m</label><input id="pointX" type="number" step="0.01" '+(selected?'value="'+selected[0].toFixed(3)+'"':'disabled')+'></div>'+
-   '<div class="row"><label>Y m</label><input id="pointY" type="number" step="0.01" '+(selected?'value="'+selected[1].toFixed(3)+'"':'disabled')+'></div>'+
-   '<div class="tools"><button id="addPoint">'+(addPointMode?'取消加点':'添加控制点')+'</button><button id="deletePoint">删除所选点</button><button id="reverse">反向路线</button><button id="restoreRoute">恢复初始两点</button></div>'+
-   '<p id="routeState" class="small '+(state&&state.xy?'muted':'warn')+'"></p>'+
-   '<p id="routeIssue" class="small warn"></p>'+
-   '<p class="muted">'+p.asset_id+'<br>源帧 '+p.source_frames[0]+'–'+p.source_frames.at(-1)+'</p>';
-  let selector=$('pointSelect');selector.replaceChildren(...points.map((z,i)=>new Option((i+1)+' · ('+z[0].toFixed(2)+', '+z[1].toFixed(2)+')',String(i))));
-  if(points.length)selector.value=String(selectedPoint);else selector.disabled=true;
-  selector.onchange=e=>{selectedPoint=Number(e.target.value);properties();draw()};
-  for(let [id,key] of [['speed','speed_m_s'],['progress','start_progress_m']])$(id).onchange=e=>{let v=Number(e.target.value);if(!Number.isFinite(v))return; snapshot();p[key]=v;changed()};
-  for(let [id,axis] of [['pointX',0],['pointY',1]])$(id).onchange=e=>{let v=Number(e.target.value);if(!Number.isFinite(v)||!points[selectedPoint])return;snapshot();points[selectedPoint][axis]=v;changed()};
-  $('addPoint').onclick=()=>{addPointMode=!addPointMode;properties();setStatus(addPointMode?'加点已开启：在现有路线附近点击，随后拖动新点。':'加点已关闭。')};
-  $('deletePoint').disabled=points.length<=2;
-  $('deletePoint').onclick=()=>{if(points.length<=2)return;snapshot();points.splice(selectedPoint,1);selectedPoint=Math.min(selectedPoint,points.length-1);changed()};
-  $('reverse').onclick=()=>{snapshot();points.reverse();selectedPoint=points.length-1-selectedPoint;changed()};
-  $('restoreRoute').onclick=async()=>{if(!confirm('将 P'+p.person_id+' 的路线恢复为初始起点和终点，并重置速度、起始进度？其他人物/机位保持当前值。'))return;
-   try{let original=await api('/api/default?scene='+recipe.scene),source=original.people.find(x=>x.person_id===p.person_id);
-    if(!source||source.asset_id!==p.asset_id)throw Error('原始资产不匹配');
-    snapshot();p.control_points_xy_m=JSON.parse(JSON.stringify(source.control_points_xy_m));p.speed_m_s=source.speed_m_s;p.start_progress_m=source.start_progress_m;selectedPoint=0;addPointMode=false;changed()
-   }catch(e){setStatus('恢复路线失败：'+e.message)}};
-  $('routeState').textContent=state&&state.xy?'当前 '+(frame/10).toFixed(1)+' 秒：X '+state.xy[0].toFixed(2)+' m，Y '+state.xy[1].toFixed(2)+' m，行进方向 '+state.headingDeg.toFixed(1)+'°；剩余路线 '+(state.total-state.distance).toFixed(2)+' m':(state?'当前时刻：'+state.error:'请添加至少两个控制点');
-  if(issue)$('routeIssue').textContent='第 '+(issue.index+1)+' 个控制点附近存在明显折返（相邻路段 '+issue.legA.toFixed(2)+' m / '+issue.legB.toFixed(2)+' m）。请选中此点检查或删除。';
- }else if(mode==='rig'){
-  let r=recipe.rigs.find(x=>x.rig_id===selectedRig);if(!r)return;
-  box.innerHTML='<h3>'+r.rig_id+'</h3><div class="row"><label>yaw °</label><input id="yaw" type="number" step="1" value="'+r.yaw_deg+'"></div><div class="row"><label>X m</label><input id="rigX" type="number" step="0.01" value="'+r.origin_m[0]+'"></div><div class="row"><label>Y m</label><input id="rigY" type="number" step="0.01" value="'+r.origin_m[1]+'"></div><p class="muted">两光心与安装高度固定；基线 0.18 m 为合成配置。</p>';
-  for(let [id,set] of [['yaw',v=>r.yaw_deg=v],['rigX',v=>r.origin_m[0]=v],['rigY',v=>r.origin_m[1]=v]])$(id).onchange=e=>{let v=Number(e.target.value);if(!Number.isFinite(v))return;snapshot();set(v);changed()}
- }
-}
-function refresh(){if(!recipe)return;$('recipeId').value=recipe.recipe_id;$('seed').value=recipe.seed;$('people').innerHTML=recipe.people.map(p=>`<div class="card ${selectedPerson===p.person_id?'active':''}" data-p="${p.person_id}">P${p.person_id} · ${p.role}<br><span class="muted">${p.asset_id}<br>${p.root_mode}</span></div>`).join('');document.querySelectorAll('[data-p]').forEach(el=>el.onclick=()=>{selectedPerson=+el.dataset.p;selectedPoint=0;addPointMode=false;mode='route';refresh()});$('rigs').innerHTML=recipe.rigs.map(r=>`<div class="card ${selectedRig===r.rig_id?'active':''}" data-r="${r.rig_id}">${r.rig_id} · yaw ${r.yaw_deg.toFixed(1)}°</div>`).join('');document.querySelectorAll('[data-r]').forEach(el=>el.onclick=()=>{selectedRig=el.dataset.r;addPointMode=false;mode='rig';refresh()});$('previewRig').innerHTML=recipe.rigs.map(r=>`<option value="${r.rig_id}">${r.rig_id}</option>`).join('');if(selectedRig)$('previewRig').value=selectedRig;$('technical').textContent=JSON.stringify({base_prepared:recipe.base_prepared,map_version:recipe.map_version,algorithm:recipe.algorithm,render:recipe.render},null,2);properties();draw()}
-async function openScene(scene){recipe=await api('/api/default?scene='+scene);map=await api('/api/map?scene='+scene);view=scene==='city'?{x:0,y:81,scale:10}:{x:0,y:2,scale:13};selectedPerson=1;selectedRig=recipe.rigs[0].rig_id;selectedPoint=0;addPointMode=false;history=[];future=[];previewRevision=null;$('rev').textContent=`修订 r${recipe.revision}`;refresh()}
-let canvas=$('map');
-canvas.addEventListener('pointerdown',e=>{
- let [mx,my]=canvasPoint(e),w=toWorld(mx,my);
- if(mode==='pan'){canvas.setPointerCapture(e.pointerId);drag={kind:'pan',x:mx,y:my,view:{...view}};return}
- if(mode==='rig'){
-  let hit=recipe.rigs.map(r=>({item:r,distance:Math.hypot(...toScreen(r.origin_m).map((v,i)=>v-[mx,my][i]))})).sort((a,b)=>a.distance-b.distance)[0];
-  let r=hit?.distance<24?hit.item:recipe.rigs.find(q=>q.rig_id===selectedRig);
-  if(!r){setStatus('请先选择一组双机。');return}
-  selectedRig=r.rig_id;
-  if(hit?.distance>=24){snapshot();r.origin_m[0]=w[0];r.origin_m[1]=w[1]}
-  drag={kind:'rig',item:r,moved:hit?.distance>=24,snapshotTaken:hit?.distance>=24,start:[...r.origin_m],placed:hit?.distance>=24};
-  canvas.setPointerCapture(e.pointerId);properties();draw();
-  return;
- }
- let p=recipe.people.find(q=>q.person_id===selectedPerson),points=p.control_points_xy_m,issue=routeIssue(points);
- if(addPointMode){
-  let best=nearestRouteInsertion(points,mx,my);
-  if(best&&best.distance>20){setStatus('加点未执行：请点击屏幕上画出的轨迹附近（20 像素内）。');return}
-  if(best?.tooShort){setStatus('加点未执行：这一段已有非常密集的控制点，请先放大或调整邻近点。');return}
-  let index=best?.index??points.length,location=best?.location??w;
-  snapshot();points.splice(index,0,location);selectedPoint=index;addPointMode=points.length<2;
-  drag={kind:'point',item:p,index,moved:true,snapshotTaken:true,start:[...location],inserted:true,pointerStart:[mx,my]};
-  canvas.setPointerCapture(e.pointerId);properties();draw();return;
- }
- let hits=points.map((z,i)=>({i,d:Math.hypot(...toScreen(z).map((v,j)=>v-[mx,my][j]))}))
-  .filter(x=>(x.i%5===0||x.i===selectedPoint||x.i===issue?.index)&&x.d<10).sort((a,b)=>a.d-b.d);
- if(hits.length){
-  selectedPoint=hits[0].i;drag={kind:'point',item:p,index:selectedPoint,moved:false,snapshotTaken:false,start:[...points[selectedPoint]]};
-  canvas.setPointerCapture(e.pointerId);properties();draw();return;
- }
- setStatus('未修改路线：要加点，请先点右侧“添加控制点”。');
-});
-canvas.addEventListener('pointermove',e=>{
- let [mx,my]=canvasPoint(e),w=toWorld(mx,my);
- $('coords').textContent='鼠标 X '+w[0].toFixed(2)+' m · Y '+w[1].toFixed(2)+' m · 50 px = '+(50/view.scale).toFixed(1)+' m';
- if(!drag)return;
- if(drag.inserted&&Math.hypot(mx-drag.pointerStart[0],my-drag.pointerStart[1])<4)return;
- if(drag.kind==='pan'){view.x=drag.view.x-(mx-drag.x)/view.scale;view.y=drag.view.y+(my-drag.y)/view.scale}
- else{
-  if(Math.hypot(w[0]-drag.start[0],w[1]-drag.start[1])>.005&&!drag.snapshotTaken){snapshot();drag.snapshotTaken=true}
-  if(!drag.snapshotTaken)return;
-  if(drag.kind==='rig'){drag.item.origin_m[0]=w[0];drag.item.origin_m[1]=w[1]}
-  else drag.item.control_points_xy_m[drag.index]=w;
-  drag.moved=true;
- }
- draw();
-});
-function endPointer(){let inserted=drag?.inserted,index=drag?.index,rigMoved=drag?.kind==='rig'&&drag?.moved;if(drag?.moved)changed();else if(drag)properties();drag=null;if(inserted)setStatus('已插入第 '+(index+1)+' 个控制点；可拖动或在右侧输入精确坐标。');if(rigMoved)setStatus('已更新所选机位位置；可在右侧输入精确 X/Y 和 yaw。')}
-canvas.addEventListener('pointerup',endPointer);
-canvas.addEventListener('pointercancel',endPointer);
-canvas.addEventListener('wheel',e=>{e.preventDefault();let [mx,my]=canvasPoint(e),w=toWorld(mx,my);view.scale=Math.max(2,Math.min(45,view.scale*(e.deltaY<0?1.15:.87)));let now=toWorld(mx,my);view.x+=w[0]-now[0];view.y+=w[1]-now[1];draw()},{passive:false});
-for(let [id,name] of [['routeMode','route'],['rigMode','rig'],['panMode','pan']])$(id).onclick=()=>{mode=name;if(name!=='route')addPointMode=false;properties();draw()};$('scene').onchange=e=>openScene(e.target.value);$('timeline').oninput=e=>{frame=Number(e.target.value);$('time').textContent=`${(frame/10).toFixed(1)} 秒 / frame ${frame}`;properties();draw()};$('undo').onclick=()=>{if(history.length){future.push(JSON.stringify(recipe));recipe=JSON.parse(history.pop());changed()}};$('redo').onclick=()=>{if(future.length){history.push(JSON.stringify(recipe));recipe=JSON.parse(future.pop());changed()}};$('seed').onchange=e=>{snapshot();recipe.seed=Number(e.target.value);changed()};$('recipeId').onchange=e=>{snapshot();recipe.recipe_id=e.target.value;changed()};$('save').onclick=async()=>{try{let x=await api('/api/save',{recipe});$('loadId').value=x.id;setStatus(`已保存 ${x.id}\n${x.path}`)}catch(e){setStatus('保存失败：'+e.message)}};$('load').onclick=async()=>{try{recipe=await api('/api/load?id='+encodeURIComponent($('loadId').value));map=await api('/api/map?scene='+recipe.scene);$('scene').value=recipe.scene;selectedRig=recipe.rigs[0].rig_id;selectedPerson=1;selectedPoint=0;addPointMode=false;history=[];future=[];refresh();setStatus('已载入 '+$('loadId').value)}catch(e){setStatus('载入失败：'+e.message)}};
-function readableCheck(message){
- let match=/^p(\d+):frame(\d+):heading_jump_([\d.]+)deg_in_0\.1s$/.exec(message);
- return match?'P'+match[1]+' 在第 '+match[2]+' 帧朝向突变 '+match[3]+'° / 0.1 秒；请检查路线折返控制点。':message;
-}
-async function check(all){
- try{
-  let x=await api('/api/check',{recipe,frames:all?undefined:[frame],rig_ids:all?undefined:[$('previewRig').value]});
-  let warnings=(x.warnings||[]).map(readableCheck),errors=(x.errors||[]).map(readableCheck);
-  $('checkResult').textContent=x.status==='passed'?
-   (all?'全段':'当前时刻及所选相机组')+'基础检查通过；精确身体/ROI在任务装配时执行。'+
-    (warnings.length?'\n局部轨迹提示：\n'+warnings.slice(0,8).join('\n'):''):
-   errors.slice(0,8).join('\n');
-  $('checkResult').className='small '+(x.status==='passed'&&!warnings.length?'ok':'warn');
-  return x;
- }catch(e){$('checkResult').textContent=e.message;return null}
-}
-$('check').onclick=()=>check(false);$('checkAll').onclick=()=>check(true);
-async function start(kind){let x=await check(kind==='episode');if(!x||x.status!=='passed')return;if(kind==='episode'){let calls=31*2*recipe.rigs.length;let okay=confirm(`同一修订 r${recipe.revision}：31 时刻 × ${recipe.rigs.length} 组双机 = ${calls} 次相机调用。预算 40 分钟，生产将重新渲染预览帧。开始？`);if(!okay)return}try{let task=await api('/api/start',{kind,recipe,frame,rig_id:$('previewRig').value});lastTask=task.task_id;localStorage.setItem('sceneEditorLastTask',lastTask);lastTaskReused=!!task.reused;$('cancel').disabled=lastTaskReused;setStatus(lastTaskReused?`已复用完成的双路预览：${lastTask}`:`任务 ${lastTask} 已排队`);poll()}catch(e){setStatus('启动失败：'+e.message)}}$('preview').onclick=()=>start('preview');$('generate').onclick=()=>start('episode');$('cancel').onclick=async()=>{try{await api('/api/cancel',{task_id:lastTask});setStatus('任务已取消；现场保留')}catch(e){setStatus(e.message)}};
-function displayEpisode(id){
- let entry=episodeCatalog.find(x=>x.id===id);if(!entry||!entry.videos.length)return;
- $('episodeChoice').value=id;$('episodePanel').hidden=false;$('showEpisodes').textContent='收起视频';
- let select=$('videoRig'),previous=select.value;select.replaceChildren(...entry.videos.map(v=>new Option(v.rig_id,v.rig_id)));
- select.value=entry.videos.some(v=>v.rig_id===previous)?previous:entry.videos[0].rig_id;displayVideoRig();
- let footer=$('episodePanel').closest('footer');footer.scrollTop=footer.scrollHeight-footer.clientHeight;
-}
-function displayVideoRig(){
- let entry=episodeCatalog.find(x=>x.id===$('episodeChoice').value);if(!entry)return;
- let video=entry.videos.find(v=>v.rig_id===$('videoRig').value);if(!video)return;
- $('episodeVideo').src=video.url;$('episodeVideo').load();$('downloadVideo').href=video.url;
- $('downloadVideo').download=`${entry.id}_${video.rig_id}.mp4`;
- $('videoPath').textContent=`文件：${video.path}`;
-}
-async function refreshEpisodes(preferredId){
- episodeCatalog=await api('/api/episodes');let select=$('episodeChoice'),old=select.value;
- select.replaceChildren(...episodeCatalog.map(x=>new Option(`${x.id} · r${x.revision}`,x.id)));
- $('showEpisodes').hidden=!episodeCatalog.length;
- if(episodeCatalog.length){let id=episodeCatalog.some(x=>x.id===preferredId)?preferredId:(episodeCatalog.some(x=>x.id===old)?old:episodeCatalog[0].id);select.value=id;if(preferredId||!$('episodePanel').hidden)displayEpisode(id)}
-}
-$('showEpisodes').onclick=()=>{if($('episodePanel').hidden)displayEpisode($('episodeChoice').value);else {$('episodePanel').hidden=true;$('showEpisodes').textContent='查看视频'}};
-$('episodeChoice').onchange=()=>displayEpisode($('episodeChoice').value);
-$('videoRig').onchange=displayVideoRig;
-async function poll(){if(!lastTask)return;try{let t=await api('/api/task?id='+lastTask);setStatus(`${lastTaskReused?'已复用 · ':''}${t.kind} · ${t.state} · 修订 r${t.revision}\n${t.error||''}\n${t.log_tail||''}`);if(t.state==='completed'){if(t.kind==='preview'){for(let c of ['cam2','cam4'])$(c).src=`/api/image/${t.id}/${t.rig_id}/${t.frame}/${c}`;$('rev').textContent=`预览 r${t.revision}${recipe.revision===t.revision?'':' · 已过期'}`}else {setStatus(`整段完成：${t.result}\n${t.log_tail||''}`);refreshEpisodes(t.id).catch(e=>setStatus('视频列表读取失败：'+e.message))}}if(t.state==='completed_after_repair'){setStatus(`渲染完成；首次打包失败后仅修复元数据并重跑收尾。\n${t.error}\n验收：${t.repair_ref}`);refreshEpisodes(t.id).catch(e=>setStatus('视频列表读取失败：'+e.message))}if(['completed','completed_after_repair','failed','cancelled'].includes(t.state)){$('cancel').disabled=true;return}setTimeout(poll,1500)}catch(e){setStatus(e.message)}}
-$('addPerson').onclick=async()=>{try{let id=recipe.people.length+1;if(id>5)throw Error('首版上限为 5 人');let p=await api(`/api/person?scene=${recipe.scene}&id=${id}`);snapshot();recipe.people.push(p);selectedPerson=id;selectedPoint=0;mode='route';changed();setStatus(`人物 ${id} 已加入，初始路线只有起点和终点；请调整并检查路线。`)}catch(e){setStatus('无法增加人物：'+e.message)}};
-$('removePerson').onclick=()=>{if(recipe.people.length<=1)return setStatus('至少保留一人');snapshot();recipe.people.pop();selectedPerson=Math.min(selectedPerson,recipe.people.length);changed()};
-$('addRig').onclick=()=>{if(recipe.rigs.length>=3)return setStatus('最多三组绑定双机');let source=recipe.rigs.find(r=>r.rig_id===selectedRig)||recipe.rigs[0];let n=1;while(recipe.rigs.some(r=>r.rig_id===`rig_custom_${n}`))n++;let copy=JSON.parse(JSON.stringify(source));copy.rig_id=`rig_custom_${n}`;copy.source_rig_id=source.source_rig_id||source.rig_id;copy.origin_m[0]+=.8;snapshot();recipe.rigs.push(copy);selectedRig=copy.rig_id;mode='rig';changed()};
-$('removeRig').onclick=()=>{if(recipe.rigs.length<=1)return setStatus('至少保留一组双机');snapshot();recipe.rigs=recipe.rigs.filter(r=>r.rig_id!==selectedRig);selectedRig=recipe.rigs[0].rig_id;changed()};
-window.addEventListener('resize',canvasSize);new ResizeObserver(canvasSize).observe(canvas);openScene('city').then(()=>{canvasSize();refreshEpisodes().catch(e=>setStatus('视频列表读取失败：'+e.message));lastTask=localStorage.getItem('sceneEditorLastTask');if(lastTask)poll()}).catch(e=>setStatus(e.message));
-</script></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>人体数据场景编辑器</title>
+  <link rel="stylesheet" href="/editor.css">
+  <script type="module" src="/editor.js"></script>
+</head>
+<body>
+<header>
+  <strong>人体场景编辑器</strong>
+  <span id="dirty" role="status">正在载入…</span>
+</header>
+<main>
+  <aside class="panel controls">
+    <nav class="tabs" aria-label="编辑步骤">
+      <button id="sceneTab" class="active" type="button">1 基准场景</button>
+      <button id="rulesTab" type="button">2 随机变化</button>
+    </nav>
+    <div id="scenePanel">
+      <h2>场景</h2>
+      <label for="environment">环境</label><select id="environment"><option value="city">城市</option><option value="riverfront">河岸</option></select>
+      <button id="placeEnvironment" type="button">把人物和相机整体移到当前环境附近</button>
+      <p class="hint">切换环境会保留原路线和相机位置；上方按钮只平移位置，保留路线形状、人物组合和相机朝向。移动后请做 CPU 检查。</p>
+      <label for="sceneId">场景名称</label><input id="sceneId" autocomplete="off">
+      <div class="fields3">
+        <div><label for="sceneSeed">场景种子</label><input id="sceneSeed" type="number" min="1"></div>
+        <div><label for="fps">帧率 / 秒</label><input id="fps" type="number" min="1"></div>
+        <div><label for="frameCount">帧数</label><input id="frameCount" type="number" min="1"></div>
+      </div>
+      <h2>人物与路线</h2>
+      <div id="people"></div><button id="addPerson" type="button">＋ 增加人物</button>
+      <h2>相机组</h2>
+      <div id="rigs"></div><button id="addRig" type="button">＋ 增加相机组</button>
+      <p class="hint">地图绿色区域是道路候选区域，仍须使用 CPU 检查。</p>
+    </div>
+    <div id="rulesPanel" hidden>
+      <h2>从基准场景生成变体</h2>
+      <p class="hint">默认全部固定。打开某项“随机变化”后，才会使用下面的范围或候选。</p>
+      <button id="newRules" type="button">从当前场景开始新规则</button>
+      <p class="hint">替换当前页面的规则草稿；已导出的城市规则文件不会改变。</p>
+      <label for="templateSelect">当前基准场景</label><select id="templateSelect"></select>
+      <div class="toolbar"><button id="addTemplate" type="button">加入当前场景为新基准</button><button id="removeTemplate" type="button">移除当前基准</button></div>
+      <label for="templateId">模板编号（英文小写、数字或下划线）</label><input id="templateId" autocomplete="off" maxlength="48" pattern="[a-z0-9_]{1,48}">
+      <p class="hint">模板编号只是规则中的名字；切换到河岸不会自动改名。</p>
+      <p class="hint">生成多少个变体留到运行批量命令时决定；这里的规则只规定如何变化。</p>
+      <label for="batchSeed">批次随机种子</label><input id="batchSeed" type="number" min="1">
+      <div id="sharedOffset"></div>
+      <h2>每个人怎么变</h2><div id="personRules"></div>
+      <h2>相机组怎么变</h2><div id="rigRules"></div>
+    </div>
+  </aside>
+  <section class="map-panel" aria-label="场景地图">
+    <canvas id="map" aria-label="路线和相机组地图"></canvas>
+    <div class="map-hint" id="mapHint">橙点：当前帧人物；青/紫箭头：cam2/cam4 光轴方向</div>
+    <button id="backToBase" type="button" hidden>返回基准场景</button>
+  </section>
+  <aside class="panel actions">
+    <h2>检查与保存</h2>
+    <div class="fields2"><div><label for="frame">当前帧 <span id="frameLabel"></span></label><input id="frame" type="range" min="0" value="0"></div><div><label for="previewRig">预览相机组</label><select id="previewRig"></select></div></div>
+    <p id="timelineNote" class="hint" role="status">正在计算当前帧的人物位置…</p>
+    <button id="check" type="button">CPU 检查场景</button><button id="save" type="button">保存场景修订</button>
+    <label for="recipeSelect">载入已保存场景</label><div class="inline"><select id="recipeSelect"></select><button id="load" type="button">载入</button></div>
+    <label for="sceneFile">或导入场景 JSON</label><input id="sceneFile" type="file" accept=".json,application/json">
+    <details><summary>真实预览与生成</summary>
+      <button id="preview" type="button">GPU 预览当前帧</button><button id="generate" type="button">GPU 生成所设帧段</button>
+      <p class="hint">这两个按钮才会启动真实渲染；检查、试抽和导出规则不会。</p>
+    </details>
+    <h2>随机规则</h2>
+    <button id="tryRules" type="button">试抽配置并检查</button>
+    <div id="samples" class="samples"></div>
+    <label for="ruleName">导出名称</label><input id="ruleName" value="my_variants" autocomplete="off">
+    <button id="exportRules" type="button">导出规则文件</button>
+    <label for="ruleSelect">载入已导出规则</label><div class="inline"><select id="ruleSelect"></select><button id="loadRules" type="button">载入</button></div>
+    <label for="ruleFile">或导入规则 JSON</label><input id="ruleFile" type="file" accept=".json,application/json">
+    <div id="exportResult"></div>
+    <div id="feedback" role="status" aria-live="polite"></div>
+    <h2>预览图片</h2>
+    <p id="previewNote" class="hint">尚无当前场景的预览。</p>
+    <div class="images"><a id="cam2Link" target="_blank" rel="noopener"><img id="cam2" alt="cam2 预览"></a><a id="cam4Link" target="_blank" rel="noopener"><img id="cam4" alt="cam4 预览"></a></div>
+  </aside>
+</main>
+</body>
+</html>
