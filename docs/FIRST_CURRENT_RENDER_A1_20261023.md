@@ -1,0 +1,13 @@
+# 当前流程首次短真实渲染（2026-10-23）
+
+结果：城市双人场景的选定帧 `0, 5` 已从当前六文件准备目录走通真实 Blender 装配、GPU ROI 渲染、持久 CPU consumer、512 标签、`mamma_bundle_v1` 导出，以及 MAMMA `check-data` 读取。成功任务为 [first_current_render_a1_20261023_pair_walk_densekp_env](../outputs/runs/first_current_render_a1_20261023_pair_walk_densekp_env/)，场景配置为 [first_current_render_a1_20261023_pair_walk.json](../outputs/scenes/first_current_render_a1_20261023_pair_walk.json)。这是一个 `human_scene_v2`、6 帧、8 fps 的场景，仅选择其中两帧执行；未做整段生产。
+
+场景有两个独立 target。人物 1 使用 M03 身体、KIT11_walk 动作、跨身体 M02_simple 衣物、M01_groom 发型；人物 2 使用 F05 身体、KIT11_walk 动作、M05_simple 衣物、M04_groom 发型。共 1 个 `rig_side`，cam2/cam4 各渲染两次，正常 5760×2880 逻辑 ERP、64 samples 和原有 ROI/标签规则。`multirig_render_result.json` 记录一次场景装配、两次人物几何更新、四次相机调用及一个持久 consumer。GPU 0 在运行前通过空闲检查；成功执行耗时 77.52 秒，Blender 子进程返回 0，consumer 正常退出，成功任务的临时源缓冲已清理。
+
+[observations.json](../outputs/runs/first_current_render_a1_20261023_pair_walk_densekp_env/observations.json) 为 `mamma_bundle_v1`、`scope=selected`，覆盖两帧 × 两相机 × 两人物的 8 个观察槽。cam4 四个槽均 observed；cam2 四个槽均以 `empty_target_mask` absent 保留。cam2 原始预览能看到人物，但最终物理鱼眼域裁掉了人物，仅留右侧窄区域，因此不能将预览中的人物误记为有效 mask。cam4 的 RGB 中两人衣物、发型和位置未见明显装配错误，frame 0 到 frame 5 有可见姿态与位置变化；两人的 mask 分别对应画面左、右人物，互不混淆。[图片索引](../outputs/runs/first_current_render_a1_20261023_pair_walk_densekp_env/inspection.html) 可查看四张最终 ROI 与逐人 mask；[frame 0/cam4 点位叠加](../outputs/runs/first_current_render_a1_20261023_pair_walk_densekp_env/inspection_frame0_cam4.svg) 将完整 ERP 的 XY 减去 ROI 左上角后绘制，未改写原图片。
+
+四份相机 `mamma_512.npz` 的人物顺序均为 `[1,2]`，每人 512 点；模板点序与清单一致，身份、帧、相机、时间及 ROI 引用核对通过，有定义的 XY 均为有限值。全部 4096 个标签值中 `1: 604`、`0: 0`、`-1: 3492`；其中四个 observed 槽各有完整的 512 坐标。没有产生可信 visibility 负例，不能据此放行 visibility 训练。MAMMA 正常 `check-data --manifest ... --limit 2` 实际读回 frame 0/cam4 的人物 1 和 2：输入形状 `[3,512,384]`、mask `[1,512,384]`，坐标有效数各 512，visibility 有效数分别 135、164；读取采用 `mask_bbox_inclusive_v1`，`model_loaded=false`。本批没有构造或运行训练网络。
+
+本轮曾保留两个失败现场，之后已按用户要求删除这两个失败任务目录；成功数据和以下失败原因记录保留。首次使用 `camerahmr` 解释器时，Blender 导入 `imaging.output_modes` 因顶层 `cv2` 导入失败，约 1.00 秒后退出；已将该函数专用依赖延迟到函数内导入。修复后重试渲染了 frame 0 的 cam2/cam4，却因 `camerahmr` CPU consumer 缺少 `OpenEXR` 在消费阶段停止，约 83.12 秒，当时保留源 EXR 和日志用于定位（现已随失败目录删除）。用户随后指示“哪个环境能用就用哪个”，故使用已验证可导入 consumer 且可实际读取失败现场 EXR 的 `densekp_render` 环境重新准备并执行成功。新增的 consumer 依赖预检会在启动 GPU 前拒绝缺少 `OpenEXR` 的解释器；README 现在使用 `densekp_render`。三次真实执行合计约 161.64 秒，未超过原 1800 秒累计预算。
+
+[checks.json](../outputs/runs/first_current_render_a1_20261023_pair_walk_densekp_env/checks.json) 保存结构、标签和 mask 的核对摘要。当前 14 项 CPU/mock 测试通过（7.43 秒），`densekp_render` 的正常 `plan` 与 EXR 读取也通过。失败任务未重启或覆盖；之后仅按用户要求删除本轮两份失败任务，其他旧资产和历史输出未移动；未安装依赖、重启编辑器、制作视频、训练或扩批。此次只验证一个组件组合场景、一个 rig 和两帧，不能代表全部组合的画面质量或整段生产，也不代表 visibility 负例资格或模型效果。

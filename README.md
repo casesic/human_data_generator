@@ -19,10 +19,10 @@
 ```bash
 cd /mnt/data1/yy/home/yy/Projects/human_data_generator
 export PYTHONPATH="$PWD/src"
-GEN_PY=/mnt/data1/yy/home/yy/Repos/mamma/.venv/bin/python
+GEN_PY=/home/yy/conda_envs/densekp_render/bin/python
 ```
 
-每次新开终端，先执行上面这三行。换到其他机器时，需要调整 Python 路径和 [resources.json](config/resources.json) 中的资源位置。
+每次新开终端，先执行上面这三行。生成时使用的 Python 也会成为 CPU consumer 的解释器，必须能读取 OpenEXR；本机 `densekp_render` 已通过真实渲染验证，`camerahmr` 缺少 `OpenEXR`。换到其他机器时，需要调整 Python 路径和 [resources.json](config/resources.json) 中的资源位置。
 
 常用文件：
 
@@ -255,7 +255,7 @@ outputs/runs/walk_001/
 
 ### 渲染完成时
 
-先看任务根目录的 `data_complete.json` 和 `observations.json`。前者记录数据完成情况，后者是训练数据清单。
+先看任务根目录的 `status.json` 和 `observations.json`。`status.json` 的 `state: "data_complete"` 表示图片、标签和清单已经完成；`observations.json` 是训练数据清单。渲染过程事件追加在 `events.jsonl`，错误详情可查看 `blender.log` 和 `consumer_worker.log`。可选视频失败时，数据仍可完成，视频结果记录在 `status.json` 的 `video_status` 中。
 
 具体图片和标签在 `rigs/<相机组>/frame_<帧号>/<相机>/` 下，常用文件为：
 

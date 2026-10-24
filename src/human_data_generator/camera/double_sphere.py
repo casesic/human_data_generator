@@ -25,10 +25,12 @@ class DoubleSphereIntrinsics:
 
 
 DS_20260320 = {
-    "cam2": DoubleSphereIntrinsics(-0.12464126, 0.56540615, 681.49808088,
-                                     682.11759351, 1445.73197064, 1444.25576211),
-    "cam4": DoubleSphereIntrinsics(-0.15331803, 0.55745717, 656.78496421,
-                                     655.70192322, 1440.93901552, 1443.33089179),
+    "cam2": DoubleSphereIntrinsics(
+        -0.12464126, 0.56540615, 681.49808088, 682.11759351, 1445.73197064, 1444.25576211
+    ),
+    "cam4": DoubleSphereIntrinsics(
+        -0.15331803, 0.55745717, 656.78496421, 655.70192322, 1440.93901552, 1443.33089179
+    ),
 }
 
 ROTATION_MATRIX = np.eye(3, dtype=np.float64)
@@ -48,13 +50,14 @@ def project_double_sphere(rays: np.ndarray, intrinsics: DoubleSphereIntrinsics):
     z_shifted = intrinsics.xi * d1 + z
     d2 = np.sqrt(x * x + y * y + z_shifted * z_shifted)
     alpha = intrinsics.alpha
-    w1 = (1 - alpha) / alpha if alpha > .5 else alpha / (1 - alpha)
+    w1 = (1 - alpha) / alpha if alpha > 0.5 else alpha / (1 - alpha)
     w2 = (w1 + intrinsics.xi) / np.sqrt(2 * w1 * intrinsics.xi + intrinsics.xi**2 + 1)
     valid = z_shifted > -w2 * d1
     denominator = alpha * d2 + (1 - alpha) * z_shifted
     safe = np.where(np.abs(denominator) > 0, denominator, 1)
-    pixels = np.column_stack((intrinsics.fx * x / safe + intrinsics.cx,
-                              intrinsics.fy * y / safe + intrinsics.cy))
+    pixels = np.column_stack(
+        (intrinsics.fx * x / safe + intrinsics.cx, intrinsics.fy * y / safe + intrinsics.cy)
+    )
     return pixels, valid & np.isfinite(pixels).all(axis=1)
 
 
@@ -68,7 +71,7 @@ def unproject_double_sphere(pixels: np.ndarray, intrinsics: DoubleSphereIntrinsi
     r2 = mx * mx + my * my
     alpha, xi = intrinsics.alpha, intrinsics.xi
     valid = np.isfinite(points).all(axis=1)
-    if alpha > .5:
+    if alpha > 0.5:
         valid &= r2 < 1 / (2 * alpha - 1)
     root = np.sqrt(np.maximum(1 - (2 * alpha - 1) * r2, 0))
     denominator = alpha * root + 1 - alpha
@@ -83,8 +86,9 @@ def unproject_double_sphere(pixels: np.ndarray, intrinsics: DoubleSphereIntrinsi
     return rays, valid
 
 
-def build_erp_to_fisheye_lut(intrinsics: DoubleSphereIntrinsics, camera: str,
-                             width: int, height: int, chunk_rows: int = 128):
+def build_erp_to_fisheye_lut(
+    intrinsics: DoubleSphereIntrinsics, camera: str, width: int, height: int, chunk_rows: int = 128
+):
     """Map each output ERP pixel to the fisheye source, like pano-stitch."""
     if camera not in CAMERA_EXTRINSIC or width < 1 or height < 1:
         raise ValueError("invalid camera or ERP size")
@@ -96,9 +100,14 @@ def build_erp_to_fisheye_lut(intrinsics: DoubleSphereIntrinsics, camera: str,
         stop = min(start + chunk_rows, height)
         lat = np.arange(start, stop, dtype=np.float64) / height * np.pi - np.pi / 2
         cos_lat, sin_lat = np.cos(lat)[:, None], np.sin(lat)[:, None]
-        ray = np.stack((cos_lat * sin_lon[None, :],
-                        np.broadcast_to(sin_lat, (stop - start, width)),
-                        cos_lat * cos_lon[None, :]), axis=-1).reshape(-1, 3)
+        ray = np.stack(
+            (
+                cos_lat * sin_lon[None, :],
+                np.broadcast_to(sin_lat, (stop - start, width)),
+                cos_lat * cos_lon[None, :],
+            ),
+            axis=-1,
+        ).reshape(-1, 3)
         camera_ray = ray @ CAMERA_EXTRINSIC[camera].T @ ROTATION_MATRIX.T
         pixels, valid = project_double_sphere(camera_ray, intrinsics)
         x = map_x[start:stop].reshape(-1)
@@ -108,8 +117,13 @@ def build_erp_to_fisheye_lut(intrinsics: DoubleSphereIntrinsics, camera: str,
     return map_x, map_y
 
 
-def build_fisheye_to_source_erp_lut(intrinsics: DoubleSphereIntrinsics, camera: str,
-                                    source_width: int, source_height: int, chunk_rows: int = 128):
+def build_fisheye_to_source_erp_lut(
+    intrinsics: DoubleSphereIntrinsics,
+    camera: str,
+    source_width: int,
+    source_height: int,
+    chunk_rows: int = 128,
+):
     """Map synthetic DS fisheye pixels back to a rendered whole-sphere ERP."""
     if camera not in CAMERA_EXTRINSIC:
         raise ValueError(f"unknown camera: {camera}")
@@ -126,6 +140,6 @@ def build_fisheye_to_source_erp_lut(intrinsics: DoubleSphereIntrinsics, camera: 
         lat = np.arcsin(np.clip(erp_ray[:, 1], -1, 1))
         x = map_x[start:stop].reshape(-1)
         y = map_y[start:stop].reshape(-1)
-        x[valid] = ((lon[valid] / (2 * np.pi) + .5) * source_width).astype(np.float32)
-        y[valid] = ((lat[valid] / np.pi + .5) * source_height).astype(np.float32)
+        x[valid] = ((lon[valid] / (2 * np.pi) + 0.5) * source_width).astype(np.float32)
+        y[valid] = ((lat[valid] / np.pi + 0.5) * source_height).astype(np.float32)
     return map_x, map_y

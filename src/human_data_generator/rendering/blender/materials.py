@@ -234,28 +234,29 @@ def add_clothing_materials(mesh, folder):
 
     native = Path(folder) / "native_material.json"
     if native.is_file():
-        config=json.loads(native.read_text())
-        uv=np.load(config['uv_vertices']);faces_uv=np.load(config['uv_faces'])
-        if len(faces_uv)!=len(mesh.polygons) or faces_uv.shape[1]!=3 or uv.shape[1]!=2:
-            raise ValueError('Native clothing UV topology mismatch')
-        layer=mesh.uv_layers.new(name='GarmentUV')
-        for polygon,indices in zip(mesh.polygons,faces_uv):
-            for loop,index in zip(polygon.loop_indices,indices):
-                layer.data[loop].uv=uv[index]
-        material=bpy.data.materials.new('NativeClothing')
-        material.use_nodes=True
-        nodes,links=material.node_tree.nodes,material.node_tree.links
-        bsdf=nodes.get('Principled BSDF')
-        color=nodes.new('ShaderNodeTexImage')
-        color.image=bpy.data.images.load(config['diffuse'],check_existing=True)
-        color.image.colorspace_settings.name='sRGB'
-        links.new(color.outputs['Color'],bsdf.inputs['Base Color'])
-        normal=nodes.new('ShaderNodeTexImage')
-        normal.image=bpy.data.images.load(config['normal'],check_existing=True)
-        normal.image.colorspace_settings.name='Non-Color'
-        mapping=nodes.new('ShaderNodeNormalMap')
-        links.new(normal.outputs['Color'],mapping.inputs['Color'])
-        links.new(mapping.outputs['Normal'],bsdf.inputs['Normal'])
+        config = json.loads(native.read_text())
+        uv = np.load(config["uv_vertices"])
+        faces_uv = np.load(config["uv_faces"])
+        if len(faces_uv) != len(mesh.polygons) or faces_uv.shape[1] != 3 or uv.shape[1] != 2:
+            raise ValueError("Native clothing UV topology mismatch")
+        layer = mesh.uv_layers.new(name="GarmentUV")
+        for polygon, indices in zip(mesh.polygons, faces_uv):
+            for loop, index in zip(polygon.loop_indices, indices):
+                layer.data[loop].uv = uv[index]
+        material = bpy.data.materials.new("NativeClothing")
+        material.use_nodes = True
+        nodes, links = material.node_tree.nodes, material.node_tree.links
+        bsdf = nodes.get("Principled BSDF")
+        color = nodes.new("ShaderNodeTexImage")
+        color.image = bpy.data.images.load(config["diffuse"], check_existing=True)
+        color.image.colorspace_settings.name = "sRGB"
+        links.new(color.outputs["Color"], bsdf.inputs["Base Color"])
+        normal = nodes.new("ShaderNodeTexImage")
+        normal.image = bpy.data.images.load(config["normal"], check_existing=True)
+        normal.image.colorspace_settings.name = "Non-Color"
+        mapping = nodes.new("ShaderNodeNormalMap")
+        links.new(normal.outputs["Color"], mapping.inputs["Color"])
+        links.new(mapping.outputs["Normal"], bsdf.inputs["Normal"])
         mesh.materials.append(material)
         return
     materials = json.loads((Path(folder) / "materials.json").read_text())

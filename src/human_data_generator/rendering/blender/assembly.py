@@ -54,9 +54,7 @@ def configure_compositor(s, output_dir, name):
         file_node.file_slots.new("IndexOB")
     index_output = next((socket for socket in rl.outputs if "Index" in socket.name), None)
     if index_output is None:
-        raise RuntimeError(
-            f"object index render pass unavailable: {[x.name for x in rl.outputs]}"
-        )
+        raise RuntimeError(f"object index render pass unavailable: {[x.name for x in rl.outputs]}")
     nt.links.new(rl.outputs["Image"], file_node.inputs["Combined"])
     nt.links.new(rl.outputs["Depth"], file_node.inputs["Depth"])
     nt.links.new(index_output, file_node.inputs["IndexOB"])
@@ -103,6 +101,7 @@ def create_erp_camera(s):
 def render_cameras(s, cam, file_node, camera, output_dir, task_root):
     """CV camera-to-world -> Blender right/up/back axes; render and resolve legacy filenames."""
     from human_data_generator.runtime.task_paths import task_ref
+
     records = []
     for item in (camera,):
         pose = np.asarray(item["camera_to_world"], float)
@@ -123,16 +122,14 @@ def render_cameras(s, cam, file_node, camera, output_dir, task_root):
         bpy.ops.render.render(write_still=True)
         candidates = sorted(output_dir.glob(item["id"] + "*.exr"))
         if len(candidates) != 1:
-            raise RuntimeError(
-                f'cannot locate compositor output for {item["id"]}: {candidates}'
-            )
+            raise RuntimeError(f'cannot locate compositor output for {item["id"]}: {candidates}')
         target = output_dir / f"{item['id']}.exr"
         if candidates[0] != target:
             candidates[0].replace(target)
         records.append(
             {
                 "id": item["id"],
-                "source": task_ref(task_root,target),
+                "source": task_ref(task_root, target),
                 "camera_to_world": item["camera_to_world"],
             }
         )

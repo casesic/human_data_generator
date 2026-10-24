@@ -7,7 +7,7 @@ import sys
 import time
 from types import ModuleType, SimpleNamespace
 from copy import deepcopy
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 import tempfile
 import unittest
@@ -23,7 +23,7 @@ from human_data_generator.composition import build,_cached,_key
 from human_data_generator.config import PROJECT_ROOT
 from human_data_generator.editor.core import default_scene
 from human_data_generator.editor import server
-from human_data_generator.consumer import consume_camera_arrays
+from human_data_generator.consumer import consume_camera_arrays, load_rig_context
 from human_data_generator.data.mamma_export import export_existing
 from human_data_generator.data.mamma_crop import mask_native_support
 from human_data_generator.run import render_prepared
@@ -32,7 +32,8 @@ from human_data_generator.runtime.multirig_prepare import prepare
 from human_data_generator.runtime.scene import compile_scene,validate_scene
 from human_data_generator.runtime.scene import _curve
 from human_data_generator.runtime.task_paths import run_config, task_path
-from human_data_generator.imaging.output_modes import prepare_source_workspace, cleanup_owned_source, record_failure
+from human_data_generator.runtime.frame_consumer import serve_frames
+from human_data_generator.imaging.output_modes import prepare_source_workspace, cleanup_owned_source
 
 
 def put(path,value):
@@ -40,16 +41,16 @@ def put(path,value):
     path.write_text(json.dumps(value)+'\n')
 
 
-def synthetic_bundle(root):
+def synthetic_bundle(root, *, frames=(0,), rigs=(('rig_alpha',True),('rig_beta',False))):
     root=Path(root)
     put(root/'scene.json',dict(schema='human_scene_v2'))
     people=[dict(person_id=7,asset_id='fixture_asset',source_manifest_id='fixture_source'),
             dict(person_id=9,asset_id='fixture_asset',source_manifest_id='fixture_source')]
     put(root/'recipe.json',dict(schema='human_run_v1',scene_episode_id='fixture_episode',
-        frame_count=1,fps=8,people=people))
-    np.save(root/'scene_matrices.npy',np.broadcast_to(np.eye(4),(1,2,4,4)))
+        frame_count=max(frames)+1,fps=8,people=people))
+    np.save(root/'scene_matrices.npy',np.broadcast_to(np.eye(4),(max(frames)+1,2,4,4)))
     put(root/'run_config.json',dict(schema='human_run_config_v2',task_id='a'*32,
-        rig_ids=['rig_alpha','rig_beta'],selected_frames=[0],full_image_size_wh=[256,256],
+        rig_ids=[rid for rid,_ in rigs],selected_frames=list(frames),full_image_size_wh=[256,256],
         generation_contract='mamma_512_v1',
         mamma_512_label=dict(template_id='MAMMA_verts_512_ordered_v1')))
     valid=np.ones((256,256),bool)
@@ -65,24 +66,28 @@ def synthetic_bundle(root):
                   world=np.tile(np.array([[[0.,0.,2.]]]),(2,512,1)),
                   full_body=[triangle,triangle],faces=[np.array([[0,1,2]],np.int32)]*2,
                   vertex_ids=np.arange(512,dtype=np.int32))
-    for rid,second_visible in [('rig_alpha',True),('rig_beta',False)]:
+    for rid,second_visible in rigs:
         child=root/'rigs'/rid
         child.mkdir(parents=True)
         mask=child/'physical.png'
         Image.fromarray(valid.astype(np.uint8)*255).save(mask)
         put(child/'rig.json',dict(rig_id=rid,cameras=[dict(id='cam2'),dict(id='cam4')],
                                   valid_masks={'cam2':str(mask),'cam4':str(mask)}))
-        put(child/'planned_regions.json',{'0':{'cam2':{},'cam4':{}}})
+        put(child/'planned_regions.json',
+            {str(frame):{'cam2':{},'cam4':{}} for frame in frames})
         put(child/'label_policy.json',dict(visibility_policy='fixture'))
-    for rid,second_visible in [('rig_alpha',True),('rig_beta',False)]:
+    for rid,second_visible in rigs:
         child=root/'rigs'/rid
+        recipe, config = load_rig_context(child)
         instance=np.zeros((256,256),np.float32)
         instance[80:170,80:170]=7
         if second_visible:instance[80:170,175:235]=9
-        (child/'frame_000').mkdir()
-        for camera in ('cam2','cam4'):
-            consume_camera_arrays(child,0,camera,rgb,rng,instance,[0,0,256,256],
-                                  pose,valid,geometry)
+        for frame in frames:
+            (child/f'frame_{frame:03d}').mkdir()
+            state=dict(geometry,timing=dict(timing,episode_time_tick=frame))
+            for camera in ('cam2','cam4'):
+                consume_camera_arrays(child,frame,camera,rgb,rng,instance,[0,0,256,256],
+                                      pose,valid,state,recipe,config)
     manifest=export_existing(root)
     put(root/'observations.json',manifest)
     return manifest
@@ -340,7 +345,8 @@ class CurrentPipelineTest(unittest.TestCase):
                 ['recipe.json','rigs/rig_side/planned_regions.json','rigs/rig_side/rig.json',
                  'run_config.json','scene.json','scene_matrices.npy'])
             self.assertFalse((output/'frame_005').exists())
-            with patch('human_data_generator.run._resources',return_value={}),\
+            with patch('human_data_generator.run._preflight_consumer'),\
+                 patch('human_data_generator.run._check_gpu',return_value={}),\
                  patch('human_data_generator.run.subprocess.Popen',side_effect=RuntimeError('mock_launch')) as popen:
                 with self.assertRaisesRegex(RuntimeError,'mock_launch'):
                     render_prepared(output,'MOCK_GPU',60)
@@ -362,6 +368,83 @@ class CurrentPipelineTest(unittest.TestCase):
             run.main(['render','--scene','config/scene_example.json','--name','mock_current',
                       '--gpu-uuid','MOCK','--budget-seconds','70'])
         self.assertEqual(events,[('prepare','mock_current'),('start',70)])
+
+    def test_task_status_has_one_parent_writer_and_no_false_completion(self):
+        scene=PROJECT_ROOT/'config/scene_example.json'
+        with tempfile.TemporaryDirectory(prefix='hdg_status_') as temp:
+            prepared=Path(temp)/'prepared'
+            prepare(prepared,scene_path=scene,frame_indices=[5],selected_rig_ids=['rig_side'])
+            for name in ('success','render_failed','timed_out','export_failed','video_failed'):
+                shutil.copytree(prepared,Path(temp)/name)
+
+            def execute(name, *, blender=None, export_error=None, video_error=None, video=False):
+                output=Path(temp)/name
+                render_result=blender or dict(returncode=0,timed_out=False,wall_seconds=.1)
+                def consumer_stage(stage,*args,**kwargs):
+                    if stage=='video' and video_error:raise RuntimeError(video_error)
+                def exporter(root):
+                    if export_error:raise RuntimeError(export_error)
+                    return dict(observations=[dict(status='observed')])
+                with patch('human_data_generator.run._preflight_consumer'),\
+                     patch('human_data_generator.run._check_gpu',return_value={}),\
+                     patch('human_data_generator.run._run_blender',return_value=render_result),\
+                     patch('human_data_generator.run._run_consumer_stage',side_effect=consumer_stage),\
+                     patch('human_data_generator.data.mamma_export.export_existing',side_effect=exporter):
+                    if name in ('success','video_failed'):
+                        render_prepared(output,'MOCK_GPU',60,video=video)
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            render_prepared(output,'MOCK_GPU',60)
+                return output,json.loads((output/'status.json').read_text())
+
+            success,status=execute('success')
+            self.assertEqual((status['state'],status['data_complete']),('data_complete',True))
+            self.assertTrue((success/'observations.json').is_file())
+            self.assertFalse(any((success/name).exists() for name in
+                                 ('started.json','failure.json','data_complete.json','blender_process.json')))
+            (Path(temp)/'render_failed'/'partial.exr').write_bytes(b'failure site')
+            failure,status=execute('render_failed',blender=dict(returncode=1,timed_out=False,wall_seconds=.1))
+            self.assertEqual((status['state'],status['data_complete']),('failed',False))
+            self.assertTrue((failure/'partial.exr').is_file())
+            self.assertFalse((failure/'observations.json').exists())
+            _,status=execute('timed_out',blender=dict(returncode=-9,timed_out=True,wall_seconds=60))
+            self.assertTrue(status['blender']['timed_out'])
+            self.assertEqual(status['state'],'failed')
+            output,status=execute('export_failed',export_error='fixture_export_rejected')
+            self.assertEqual((status['stage'],status['data_complete']),('export',False))
+            self.assertFalse((output/'observations.json').exists())
+            output,status=execute('video_failed',video_error='fixture_encoder',video=True)
+            self.assertEqual((status['state'],status['video_status']),('data_complete','failed'))
+            self.assertTrue((output/'observations.json').is_file())
+
+    def test_consumer_protocol_keeps_stdout_as_json_lines(self):
+        with tempfile.TemporaryDirectory(prefix='hdg_consumer_protocol_') as temp:
+            root=Path(temp)
+            put(root/'run_config.json',dict(schema='human_run_config_v2',
+                rig_ids=['rig_side'],selected_frames=[0],task_id='a'*32))
+            rig=root/'rigs/rig_side'
+            (rig/'frame_000').mkdir(parents=True)
+            put(root/'scene.json',{})
+            put(root/'recipe.json',{})
+            np.save(root/'scene_matrices.npy',np.empty((0,)))
+            put(rig/'rig.json',{})
+            put(rig/'planned_regions.json',{})
+            seen=[]
+            def consume(path,frame):
+                print('consumer diagnostic')
+                seen.append((path,frame))
+            incoming=StringIO(json.dumps(dict(command='frame',frame=0,rig_id='rig_side'))+'\n'
+                +json.dumps(dict(command='stop'))+'\n')
+            outgoing=StringIO()
+            self.assertEqual(serve_frames(root,consume,incoming=incoming,outgoing=outgoing),0)
+            replies=[json.loads(line) for line in outgoing.getvalue().splitlines()]
+            self.assertEqual([row['status'] for row in replies],['ready','ok','stopped'])
+            self.assertEqual(seen,[(rig,0)])
+            self.assertIn('consumer diagnostic',(rig/'frame_000/consume.log').read_text())
+            bad=StringIO(json.dumps(dict(command='frame',frame=0,rig_id='rig_other'))+'\n')
+            result=StringIO()
+            self.assertEqual(serve_frames(root,consume,incoming=bad,outgoing=result),1)
+            self.assertEqual(json.loads(result.getvalue().splitlines()[-1])['status'],'error')
 
     def test_relocated_prepared_task_and_current_layout(self):
         scene=PROJECT_ROOT/'config/scene_example.json'
@@ -388,7 +471,8 @@ class CurrentPipelineTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'obsolete_run_config_fields'):
                     run_config(new)
                 put(new/'run_config.json',original)
-                with patch('human_data_generator.run._resources',return_value={}),\
+                with patch('human_data_generator.run._preflight_consumer'),\
+                     patch('human_data_generator.run._check_gpu',return_value={}),\
                      patch('human_data_generator.run.subprocess.Popen',side_effect=RuntimeError('launch_boundary')) as popen:
                     with self.assertRaisesRegex(RuntimeError,'launch_boundary'):
                         render_prepared(new,'MOCK_GPU',47)
@@ -413,7 +497,6 @@ class CurrentPipelineTest(unittest.TestCase):
             output=root/'rigs/rig_side/frame_005'
             source=prepare_source_workspace(output,'compact',task_root=root,task_id=task_id)
             (source/'evidence.txt').write_text('retained on failure')
-            record_failure(output,'compact',source,'consume',RuntimeError('fixture'))
             self.assertTrue((source/'evidence.txt').is_file())
             for changed in (outside,other/'rigs/rig_side/frame_005'):
                 with self.assertRaises(ValueError):
@@ -468,7 +551,7 @@ class CurrentPipelineTest(unittest.TestCase):
                 result=roi_module.render_rig_roi(scene,None,SimpleNamespace(directory=''),source,root,
                     dict(rig_id='rig_alpha',people=[dict(person_id=7)]),
                     [dict(id=cid,camera_to_world=image) for cid in ('cam2','cam4')],
-                    {'body':np.array([[0.,0.,1.]])},{'body':7},dict(storage_mode='roi_only'),1,
+                    {'body':np.array([[0.,0.,1.]])},{'body':7},1,
                     lambda *args,**kwargs:1)
             self.assertEqual(seen_cameras,[('cam2',root),('cam4',root)])
             self.assertEqual([row['id'] for row in result['records']],['cam2','cam4'])
@@ -494,21 +577,22 @@ class CurrentPipelineTest(unittest.TestCase):
                     self.responses=[]
                 def consume(self,frame,rig_id):
                     self.responses.append(dict(frame=frame,rig_id=rig_id))
-                    return dict(status='ok',frame=frame,rig_id=rig_id)
-                def close(self):return dict(status='closed')
+                    return dict(status='ok',frame=frame,rig_id=rig_id,seconds=0.,pid=1234)
+                def close(self):return dict(pid=1234,frames=self.responses,returncode=0)
                 def abort(self):raise AssertionError('worker aborted')
-            def fake_roi(scene,cam,node,folder,task_root,recipe,cameras,parts,owners,config,frame,started):
+            def fake_roi(scene,cam,node,folder,task_root,recipe,cameras,parts,owners,frame,started):
                 calls.append((frame,recipe['rig_id'],[c['id'] for c in cameras],task_root))
                 put(folder/'roi_plan.json',dict(cameras={c['id']:dict(roi_xyxy=[0,0,4,4]) for c in cameras}))
                 return dict(records=[dict(id=c['id'],source=f'rigs/{recipe["rig_id"]}/frame_{frame:03d}/source.exr')
                                      for c in cameras])
-            def fake_assembly(*,root,render_cameras_fn,frame_complete_fn,frame_source_dir_fn,reuse_session):
+            def fake_assembly(*,root,render_cameras_fn,frame_complete_fn,frame_source_dir_fn,
+                              reuse_session,event_fn):
                 scene=SimpleNamespace(objects=[],render=SimpleNamespace(use_persistent_data=True))
                 for frame in (1,3):
                     folder=frame_source_dir_fn(frame)
                     result=render_cameras_fn(scene,None,None,folder,frame_index=frame)
                     frame_complete_fn(frame,folder,dict(sources=result,frame_index=frame))
-                put(root/'assembly_result.json',dict(scene_reused=False))
+                return dict(scene_reused=False)
             with patch.object(multi,'FrameConsumer',Worker),\
                  patch.object(multi,'render_rig_roi',side_effect=fake_roi),\
                  patch.object(multi,'scene_settings',return_value={}),\
@@ -518,7 +602,10 @@ class CurrentPipelineTest(unittest.TestCase):
                 [(frame,rid,['cam2','cam4']) for frame in (1,3) for rid in ('rig_alpha','rig_beta')])
             self.assertTrue(all(path==root for *_,path in calls))
             self.assertFalse((root/'frame_001').exists())
-            self.assertEqual(json.loads((root/'multirig_render_result.json').read_text())['normal_path_geometry_updates'],2)
+            events=[json.loads(line) for line in (root/'events.jsonl').read_text().splitlines()]
+            self.assertEqual([event['frame_index'] for event in events
+                              if event['event']=='geometry_updated'],[1,3])
+            self.assertEqual(events[-1]['geometry_updates'],2)
             for rid in ('rig_alpha','rig_beta'):
                 self.assertTrue((root/f'rigs/{rid}/frame_001/_temporary_ds_source/source/source_manifest.json').is_file())
 
@@ -571,8 +658,9 @@ class CurrentPipelineTest(unittest.TestCase):
             key=(str(blend),blend.stat().st_size,blend.stat().st_mtime_ns,
                 ((7,str(asset_path),asset_path.stat().st_size,asset_path.stat().st_mtime_ns),),
                 (4,4),1,'MOCK')
-            prior=(person,{},vertices,vertices,np.broadcast_to(np.eye(4),(2,4,4)),matrices,
-                   body,cloth,[],[],[0,1])
+            prior=assembly.AssembledPerson(
+                person,{},vertices,vertices,np.broadcast_to(np.eye(4),(2,4,4)),matrices,
+                body,cloth,[],[],[0,1])
             assembly._SESSION=dict(key=key,scene=scene,objects=[prior],camera='mock-camera',
                                    file_node=SimpleNamespace(directory=''))
             seen=[]
@@ -590,13 +678,13 @@ class CurrentPipelineTest(unittest.TestCase):
                  patch.object(assembly,'configure_render'),\
                  patch.object(assembly,'geometry_paths',return_value={'body_vertices':body_path}),\
                  patch.object(assembly,'support_limits',return_value=(.9,1.2)):
-                assembly.main(root=root,render_cameras_fn=render_callback,
+                assembly_result=assembly.main(root=root,render_cameras_fn=render_callback,
                     frame_complete_fn=complete,frame_source_dir_fn=source_folder,reuse_session=True)
             self.assertEqual([row[0] for row in seen],[0,1])
             np.testing.assert_array_equal(seen[1][1],vertices[1])
             np.testing.assert_array_equal(seen[1][2],vertices[1])
             self.assertEqual(seen[1][3][0,3],.2)
-            self.assertEqual(json.loads((root/'assembly_result.json').read_text())['scene_reused'],True)
+            self.assertTrue(assembly_result['scene_reused'])
             assembly._SESSION=None
 
     def test_consumer_export_and_rejections(self):
@@ -630,6 +718,25 @@ class CurrentPipelineTest(unittest.TestCase):
             near_edge[:40,:40]=255
             with self.assertRaisesRegex(ValueError,'crop_filter_support_outside_roi'):
                 mask_native_support(near_edge,[0,0,256,256],[256,256])
+
+    def test_two_frame_one_rig_json_inventory(self):
+        with tempfile.TemporaryDirectory(prefix='hdg_record_inventory_') as temp:
+            root=Path(temp)
+            manifest=synthetic_bundle(root,frames=(0,5),rigs=(('rig_side',True),))
+            put(root/'status.json',dict(schema='human_task_status_v1',state='data_complete',
+                                        data_complete=True))
+            (root/'events.jsonl').write_text(json.dumps(dict(event='render_completed'))+'\n')
+            files=sorted(str(path.relative_to(root)) for path in root.rglob('*.json'))
+            self.assertEqual(files,[
+                'observations.json','recipe.json',
+                'rigs/rig_side/frame_000/cam2/raster_storage.json',
+                'rigs/rig_side/frame_000/cam4/raster_storage.json',
+                'rigs/rig_side/frame_005/cam2/raster_storage.json',
+                'rigs/rig_side/frame_005/cam4/raster_storage.json',
+                'rigs/rig_side/label_policy.json','rigs/rig_side/planned_regions.json',
+                'rigs/rig_side/rig.json','run_config.json','scene.json','status.json'])
+            self.assertEqual(len(manifest['observations']),8)
+            self.assertFalse(any(root.rglob('generation_status.json')))
 
 
 if __name__=='__main__':unittest.main()
