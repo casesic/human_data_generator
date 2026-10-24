@@ -44,7 +44,8 @@ def put(path,value):
     path.write_text(json.dumps(value)+'\n')
 
 
-def synthetic_bundle(root, *, frames=(0,), rigs=(('rig_alpha',True),('rig_beta',False))):
+def synthetic_bundle(root, *, frames=(0,), rigs=(('rig_alpha',True),('rig_beta',False)),
+                     single_pixel_second=False):
     root=Path(root)
     put(root/'scene.json',dict(schema='human_scene_v2'))
     people=[dict(person_id=7,asset_id='fixture_asset',source_manifest_id='fixture_source'),
@@ -84,7 +85,9 @@ def synthetic_bundle(root, *, frames=(0,), rigs=(('rig_alpha',True),('rig_beta',
         recipe, config = load_rig_context(child)
         instance=np.zeros((256,256),np.float32)
         instance[80:170,80:170]=7
-        if second_visible:instance[80:170,175:235]=9
+        if second_visible:
+            if single_pixel_second:instance[80,175]=9
+            else:instance[80:170,175:235]=9
         for frame in frames:
             (child/f'frame_{frame:03d}').mkdir()
             state=dict(geometry,timing=dict(timing,episode_time_tick=frame))
@@ -97,6 +100,19 @@ def synthetic_bundle(root, *, frames=(0,), rigs=(('rig_alpha',True),('rig_beta',
 
 
 class CurrentPipelineTest(unittest.TestCase):
+    def test_degenerate_target_mask_is_absent_without_losing_other_targets(self):
+        with tempfile.TemporaryDirectory(prefix='hdg_degenerate_mask_') as temp:
+            manifest = synthetic_bundle(
+                Path(temp), rigs=(('rig_alpha', True),), single_pixel_second=True
+            )
+            rows = manifest['observations']
+            self.assertEqual(len(rows), 4)
+            self.assertEqual(
+                {(row['person_id'], row['status'], row['absent_reason']) for row in rows},
+                {(7, 'observed', None), (9, 'absent', 'degenerate_target_mask_box')},
+            )
+            self.assertTrue(all(row['crop_support'] is None for row in rows if row['person_id'] == 9))
+
     def test_periodic_seam_roi_crop_and_visibility_neighbors(self):
         normal = plan_native_crop_region(
             {"body": np.array([[100., 110.], [120., 130.]])}, (256, 256)

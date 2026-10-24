@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .mamma_crop import mask_native_support
+from .mamma_crop import mask_absence_reason, mask_native_support
 from human_data_generator.io.json_file import read_json
 from human_data_generator.runtime.task_paths import run_config, task_path, task_ref
 
@@ -151,7 +151,9 @@ def export_existing(run):
                             person_id=pid,
                             person_index=index,
                             status="observed" if support is not None else "absent",
-                            absent_reason=None if support is not None else "empty_target_mask",
+                            absent_reason=(
+                                None if support is not None else mask_absence_reason(mask)
+                            ),
                             time_tick=time_tick,
                             time_base=time_base,
                             asset_frame_index=asset_frames[index],

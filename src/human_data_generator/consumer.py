@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image
 
 from .data.dynamic_scene import frame_record
-from .data.mamma_crop import mask_native_support
+from .data.mamma_crop import mask_absence_reason, mask_native_support
 from .data.mamma_labels import load_world_body, build_evidence, policy_record
 from .data.raster_storage import roi_metadata, save_roi_observation
 from .imaging.output_modes import complete_output
@@ -125,7 +125,7 @@ def consume_camera_arrays(
             dict(
                 person_id=pid,
                 status="observed" if crop is not None else "person_absent",
-                reason="mask_has_target" if crop is not None else "empty_target_mask",
+                reason="mask_has_target" if crop is not None else mask_absence_reason(mask),
                 source_sampling_supported=(
                     None if crop is None else crop["source_sampling_supported"]
                 ),

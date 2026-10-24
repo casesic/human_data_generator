@@ -26,8 +26,10 @@ def mask_native_support(mask, roi, full_size_wh):
         start = int(columns[(int(np.argmax(gaps)) + 1) % len(columns)])
         end = int(((columns - start) % full[0]).max()) + start
         x, w = start, end - start + 1
+    # A one-pixel-wide target cannot define a native crop. Keep its observation
+    # slot as absent, just like an empty mask, instead of failing the episode.
     if w == 1 or h == 1:
-        raise ValueError("degenerate_person_mask_box")
+        return None
     box = np.array(
         [roi[0] + x, roi[1] + y, roi[0] + x + w - 1, roi[1] + y + h - 1], dtype=np.float32
     )
@@ -61,3 +63,8 @@ def mask_native_support(mask, roi, full_size_wh):
         source_sampling_supported=True,
         crop_policy_version="mask_bbox_periodic_v2" if periodic_x else "mask_bbox_inclusive_v1",
     )
+
+
+def mask_absence_reason(mask):
+    """Called only after mask_native_support returned None for a valid mask."""
+    return "degenerate_target_mask_box" if np.any(mask) else "empty_target_mask"
