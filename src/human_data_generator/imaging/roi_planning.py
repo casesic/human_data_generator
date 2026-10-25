@@ -13,6 +13,9 @@ def plan_native_crop_region(projected_parts, image_size_wh, *, margin_px=32):
     geometry bounds first; the final margin also protects visibility/filtering.
     X is periodic. A crop needing pixels on both sides of the seam uses a
     full-width render strip; the target is unfolded only by the reader.
+    Y is bounded by the ERP raster. The actual mask crop is checked against
+    the rendered support by the consumer, so an over-conservative envelope
+    need not reject a crop that fits the raster.
     """
     if not np.isfinite(margin_px) or margin_px < 32:
         raise ValueError("ROI_margin_below_32_pixels")
@@ -41,6 +44,8 @@ def plan_native_crop_region(projected_parts, image_size_wh, *, margin_px=32):
     roi = np.r_[np.floor(lo - pad - margin_px), np.ceil(hi + pad + margin_px)].astype(int)
     if roi[0] < 0 or roi[2] > width:
         roi[0], roi[2] = 0, width
+    roi[1] = max(0, roi[1])
+    roi[3] = min(int(image_size_wh[1]), roi[3])
     checked_region(roi, image_size_wh)
     result = dict(
         roi_xyxy=roi.tolist(),
@@ -57,7 +62,7 @@ def plan_person_crop_union(projected_parts_by_person, image_size_wh, *, margin_p
     """One render region covering each person's complete native square crop.
 
     The space between separate people does not enlarge either person's square.
-    Every individual region must fit the full ERP raster before the union.
+    Every individual region is bounded by the full ERP raster before the union.
     """
     if not projected_parts_by_person:
         raise ValueError("empty_person_geometry")

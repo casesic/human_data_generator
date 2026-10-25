@@ -118,6 +118,20 @@ class CurrentPipelineTest(unittest.TestCase):
             {"body": np.array([[100., 110.], [120., 130.]])}, (256, 256)
         )
         self.assertEqual(normal["roi_xyxy"], [54, 64, 166, 176])
+        # The planner's square envelope can exceed the raster even when the
+        # actual 384:512 mask crop fits. Render the available raster, then let
+        # the mask-based support check decide whether this target is usable.
+        tall = plan_native_crop_region(
+            {"body": np.array([[180., 45.], [220., 215.]])}, (256, 256)
+        )
+        self.assertEqual(tall["roi_xyxy"], [0, 0, 256, 256])
+        tall_mask = np.zeros((256, 256), np.uint8)
+        tall_mask[50:206, 180:221] = 255
+        self.assertTrue(mask_native_support(tall_mask, tall["roi_xyxy"], [256, 256]))
+        unsupported_mask = np.zeros((256, 256), np.uint8)
+        unsupported_mask[:, 180:221] = 255
+        with self.assertRaisesRegex(ValueError, "crop_filter_support_outside_roi"):
+            mask_native_support(unsupported_mask, tall["roi_xyxy"], [256, 256])
         xy = np.array([[250., 110.], [3., 112.], [6., 134.], [247., 131.]])
         region = plan_native_crop_region({"body": xy}, (256, 256))
         self.assertEqual(region["roi_xyxy"][0::2], [0, 256])

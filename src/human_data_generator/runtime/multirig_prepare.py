@@ -192,10 +192,6 @@ def prepare(output, *, scene_path, frame_indices=None, selected_rig_ids=None, pr
                         person_regions={},
                         planning_method="empty_physical_camera",
                     )
-                area = np.prod(np.subtract(region["roi_xyxy"][2:], region["roi_xyxy"][:2]))
-                full_width = region["roi_xyxy"][0] == 0 and region["roi_xyxy"][2] == 5760
-                if area > 7_000_000 and not full_width:
-                    raise ValueError("ROI_pixel_budget")
                 frame_plans[cid] = region
             planned[frame] = frame_plans
         write_json(child / "planned_regions.json", planned)
