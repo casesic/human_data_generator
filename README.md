@@ -16,19 +16,30 @@
 
 已完成原城市20个及新增遮挡15个完整数据包，MAMMA按28个场景训练、7个场景验证。七份实际用户规则位于 `outputs/rules/`；下文 `config/batch_rules.json` 是通用示例，不等于本轮七份规则。
 
-当前代码与使用入口在本次收尾固定；原始数据、几何缓存、规则和渲染输出仍在本机，不纳入Git。规则校验值、训练最终权重、真实合图效果与运行入口见[本轮联合交付说明](../mamma_retrain/docs/DELIVERY_20261025.md)。新增遮挡数据记录见[15场景报告](docs/OCCLUSION_RULES_FIVE_RENDER_20261025.md)。
+当前代码与使用入口在本次收尾固定；原始数据、几何缓存、规则和渲染输出仍在本机，不纳入Git。规则校验值、训练最终权重、真实合图效果与运行入口见[本轮联合交付说明](https://github.com/casesic/mamma_retrain/blob/main/docs/DELIVERY_20261025.md)。新增遮挡数据记录见[15场景报告](docs/OCCLUSION_RULES_FIVE_RENDER_20261025.md)。
+
+## 外部依赖：mamma_retrain
+
+本仓库只产出数据包（`observations.json` + 每台相机的 RGB / 人物 mask / 有序 512 点标签），**训练和评价在另一个仓库**：
+
+- **是什么**：`mamma_retrain` 是 MAMMA 的 fork，读这份数据包做微调、可见性阈值研究和定量评价。本仓的产出就是它的训练输入。
+- **在哪**：<https://github.com/casesic/mamma_retrain>（公开）。
+- **怎么获取**：`git clone https://github.com/casesic/mamma_retrain.git`，放到与本仓**同一父目录**——历史文档里写成 `../mamma_retrain/...` 就是这个约定。
+- **为什么不写进依赖**：本仓**不 import 它**，两边只通过文件格式交接（数据包清单 + observations），所以它不在 `pyproject.toml` 里。
+- **另需一个资源文件**：`config/resources.json` 的 `mamma_template` 默认指向 `mamma_retrain/data/body_models/downsampled_verts/verts_512.pkl`；该权重需在 <https://mamma.is.tue.mpg.de/> 注册后下载，见 [DATA_SOURCES](DATA_SOURCES.md)。
+- **一处已失效的旧引用**：早前文档让读者去改 `mamma_retrain/configs/retrain/mamma_saved_gt_reader.json`，这个文件**在 mamma_retrain 里已经不存在**；训练端现在用的是 `configs/retrain/mamma_regular.json` 一类配置，以它的[当前用法](https://github.com/casesic/mamma_retrain/blob/main/docs/MAMMA_CURRENT_ENTRY.md)为准。
 
 ## 1. 开始使用
 
 以下命令在项目目录执行，使用本机已有的 Python 环境，无需重新安装本包：
 
 ```bash
-cd /mnt/data1/yy/home/yy/Projects/human_data_generator
+cd <本仓库目录>
 export PYTHONPATH="$PWD/src"
-GEN_PY=/home/yy/conda_envs/densekp_render/bin/python
+GEN_PY=<你的 Python>          # 需能 import OpenEXR
 ```
 
-每次新开终端，先执行上面这三行。生成时使用的 Python 也会成为 CPU consumer 的解释器，必须能读取 OpenEXR；本机 `densekp_render` 已通过真实渲染验证，`camerahmr` 缺少 `OpenEXR`。换到其他机器时，需要调整 Python 路径和 [resources.json](config/resources.json) 中的资源位置。
+每次新开终端，先执行上面这三行。`GEN_PY` 会同时成为 CPU consumer 的解释器，所以它必须读得了 OpenEXR —— 当时的 conda 环境里 `densekp_render` 通过真实渲染验证、`camerahmr` 缺 `OpenEXR`。换机器时改 `GEN_PY` 与 [resources.json](config/resources.json) 里的资源位置即可。
 
 常用文件：
 
@@ -236,9 +247,9 @@ ERP 的最左与最右实际上相连。人物跨过这条接缝时，对应相�
 
 ### 交给 MAMMA 读取
 
-把 [MAMMA reader 配置](../mamma_retrain/configs/retrain/mamma_saved_gt_reader.json) 中的 `manifest` 指向这次任务的 `observations.json`。
+把这次任务的 `observations.json` 接到训练端的具体字段，以 mamma_retrain 的[当前用法](https://github.com/casesic/mamma_retrain/blob/main/docs/MAMMA_CURRENT_ENTRY.md)为准。早前这里指向的 `configs/retrain/mamma_saved_gt_reader.json` 在 mamma_retrain 里**已不存在**，不要再照着找。
 
-训练端只需要清单及其引用的图片、mask 和标签，不需要原始人物、动作、衣物或发型缓存。训练操作见 [MAMMA 当前用法](../mamma_retrain/docs/MAMMA_CURRENT_ENTRY.md)。
+训练端只需要清单及其引用的图片、mask 和标签，不需要原始人物、动作、衣物或发型缓存。训练操作见 [MAMMA 当前用法](https://github.com/casesic/mamma_retrain/blob/main/docs/MAMMA_CURRENT_ENTRY.md)。
 
 ## 7. 常见情况与当前验证范围
 

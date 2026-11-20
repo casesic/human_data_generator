@@ -17,13 +17,13 @@
 
 1. **MAMMA 512 顶点模板** — `config/resources.json` 里的 `mamma_template`，
    默认指向 `mamma_retrain/data/body_models/downsampled_verts/verts_512.pkl`。
-   取得方式见 [mamma_retrain/DATA_SOURCES.md](../mamma_retrain/DATA_SOURCES.md)：
+   取得方式见 [mamma_retrain/DATA_SOURCES.md](https://github.com/casesic/mamma_retrain/blob/main/DATA_SOURCES.md)：
    `bash data/download_mamma_weights.sh --verts`（需在 `https://mamma.is.tue.mpg.de/` 注册）。
 2. **场景与相机标定** — `config/environments/*.json` 与
    `config/resources.json` 的 `calibration_dir`，指向
    `densekp_retrain/outputs/experiments/t_junction_multirig_a1_20261011/prepared_scene/calibration`。
    该目录随 `densekp_retrain/outputs/` 一起不在仓库内，需按
-   [densekp_retrain/DATA_SOURCES.md](../densekp_retrain/DATA_SOURCES.md) 重建。
+   [densekp_retrain/DATA_SOURCES.md](https://github.com/casesic/densekp_retrain/blob/master/DATA_SOURCES.md) 重建。
 3. **Blender** — `config/resources.json` 里 `blender_executable` 写死为本机路径，
    换机后必须修改。Blender 下载：`https://www.blender.org/download/`。
 4. **SMPL-X 人体模型** — `https://smpl-x.is.tue.mpg.de/`，需单独申请授权，
