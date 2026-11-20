@@ -27,6 +27,7 @@
 - **怎么获取**：`git clone https://github.com/casesic/mamma_retrain.git`，放到与本仓**同一父目录**——历史文档里写成 `../mamma_retrain/...` 就是这个约定。
 - **为什么不写进依赖**：本仓**不 import 它**，两边只通过文件格式交接（数据包清单 + observations），所以它不在 `pyproject.toml` 里。
 - **另需一个资源文件**：`config/resources.json` 的 `mamma_template` 默认指向 `mamma_retrain/data/body_models/downsampled_verts/verts_512.pkl`；该权重需在 <https://mamma.is.tue.mpg.de/> 注册后下载，见 [DATA_SOURCES](DATA_SOURCES.md)。
+- **四仓交接**：[PIPELINE_CONTRACT](https://github.com/casesic/mamma_retrain/blob/main/docs/PIPELINE_CONTRACT.md) 写清了本仓产出的数据包被谁消费、字段定义在哪。
 - **一处已失效的旧引用**：早前文档让读者去改 `mamma_retrain/configs/retrain/mamma_saved_gt_reader.json`，这个文件**在 mamma_retrain 里已经不存在**；训练端现在用的是 `configs/retrain/mamma_regular.json` 一类配置，以它的[当前用法](https://github.com/casesic/mamma_retrain/blob/main/docs/MAMMA_CURRENT_ENTRY.md)为准。
 
 ## 1. 开始使用
