@@ -7,6 +7,24 @@ name = "human-data-generator"
 version = "0.1.0"
 requires-python = ">=3.10"
 description = "Independent synthetic human ROI and MAMMA label generator"
+# Base = what the CPU generation/export path and tests import at module level.
+# Versions are unpinned on purpose: the repo never recorded measured versions.
+dependencies = [
+    "numpy",
+    "Pillow",                 # RGB/mask image IO
+    "opencv-python-headless", # cv2.boundingRect in data/mamma_crop.py (no GUI usage)
+    "joblib",                 # loading the MAMMA 512-point template pickle
+    "OpenEXR",                # depth/index channel reads in io/exr.py (imported lazily)
+]
+
+[project.optional-dependencies]
+# MP4 assembly in consumer.py (imported lazily).
+video = ["av"]
+# Body-rest composition path in composition.py (imported lazily).
+fitting = ["torch", "smplx"]
+# bpy / mathutils are NOT pip dependencies: the render/ and rendering/ modules
+# import them from Blender's own Python (see docs/environment notes in the
+# sibling repos). They are deliberately absent here.
 
 [tool.setuptools.packages.find]
 where = ["src"]
